@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Portal de reportes - Esperas de carga</title>
+<style>
+  body { font-family: Segoe UI, Arial, sans-serif; margin: 40px; }
+  .v-overlay { position: fixed; inset: 0; background: rgba(255,255,255,.6); z-index: 100;
+               display: flex; align-items: center; justify-content: center; }
+  .v-progress-circular { width: 48px; height: 48px; border: 5px solid #93c5fd; border-top-color: #1d4ed8;
+                         border-radius: 50%; animation: girar 1s linear infinite; }
+  @keyframes girar { to { transform: rotate(360deg); } }
+  .blockUI { position: fixed; inset: 0; background: rgba(0,0,0,.05); z-index: 100; }
+  #zona { margin-top: 16px; min-height: 2em; }
+</style>
+</head>
+<body>
+  <h1>Esperas de carga</h1>
+  <!--
+    ?modo=spinner  «Generar» muestra una capa con rueda (v-overlay--active + v-progress-circular) durante ms
+    ?modo=aspnet   «Generar» simula un postback asíncrono de ASP.NET (Sys.WebForms.PageRequestManager) durante ms
+    ?modo=jquery   «Generar» deja jQuery.active = 1 durante ms
+    ?modo=xhr      «Generar» pide /api/lento?ms=ms y dibuja el resultado al llegar la respuesta
+    ?modo=capa     «Generar» pone una capa transparente (blockUI) que tapa los clics durante ms
+    ?sondeo=1      la página consulta /api/ping cada 200 ms (para siempre)
+    Al terminar aparece el botón #siguiente; al pulsarlo se escribe «Siguiente pulsado».
+  -->
+  <p><button id="generar" type="button">Generar</button> <button id="otro" type="button">Otro botón</button></p>
+  <div id="zona"></div>
+  <p id="estado"></p>
+  <script>
+    var q = new URLSearchParams(location.search);
+    var modo = q.get('modo') || 'spinner';
+    var ms = parseInt(q.get('ms') || '2500', 10);
+    var pendiente = false;
+    window.Sys = { WebForms: { PageRequestManager: { getInstance: function () {
+      return { get_isInAsyncPostBack: function () { return pendiente && modo === 'aspnet'; } };
+    } } } };
+    window.jQuery = { active: 0 };
+    function terminar() {
+      var b = document.getElementById('siguiente');
+      if (!b) {
+        b = document.createElement('button');
+        b.id = 'siguiente';
+        b.type = 'button';
+        b.textContent = 'Siguiente';
+        b.addEventListener('click', function () { document.getElementById('estado').textContent = 'Siguiente pulsado'; });
+        document.getElementById('zona').appendChild(b);
+      }
+      var r = document.createElement('div');
+      r.id = 'resultado';
+      r.textContent = 'Reporte listo';
+      document.getElementById('zona').appendChild(r);
+    }
+    document.getElementById('otro').addEventListener('click', function () {
+      document.getElementById('estado').textContent = 'Otro pulsado';
+    });
+    document.getElementById('generar').addEventListener('click', function () {
+      if (modo === 'xhr') {
+        fetch('/api/lento?ms=' + ms, { cache: 'no-store' }).then(function (r) { return r.json(); }).then(terminar);
+        return;
+      }
+      var capa = null;
+      if (modo === 'spinner') {
+        capa = document.createElement('div');
+        capa.className = 'v-overlay v-overlay--active';
+        capa.innerHTML = '<div class="v-progress-circular v-progress-circular--indeterminate"></div>';
+        document.body.appendChild(capa);
+      } else if (modo === 'capa') {
+        capa = document.createElement('div');
+        capa.className = 'blockUI blockOverlay';
+        document.body.appendChild(capa);
+        terminar();                 // el botón ya está, pero tapado por la capa
+      }
+      pendiente = true;
+      if (modo === 'jquery') window.jQuery.active = 1;
+      setTimeout(function () {
+        pendiente = false;
+        window.jQuery.active = 0;
+        if (capa) capa.remove();
+        if (modo !== 'capa') terminar();
+      }, ms);
+    });
+    if (q.get('sondeo') === '1') {
+      setInterval(function () { fetch('/api/ping?t=' + Date.now(), { cache: 'no-store' }); }, 200);
+    }
+  </script>
+</body>
+</html>

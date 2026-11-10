@@ -1,0 +1,56 @@
+BOT WEB - CÓMO INSTALARLO EN OTRO ORDENADOR
+===========================================
+
+Qué necesita el otro ordenador
+------------------------------
+- Windows 10 u 11 de 64 bits.
+- Internet (para descargar Python y las piezas del bot).
+- Google Chrome o Microsoft Edge (Edge ya viene con Windows).
+- NO hacen falta permisos de administrador.
+
+
+Cómo compartirlo
+----------------
+Opción A: pasa una copia de la carpeta del bot (por ejemplo en un .zip o en un pendrive).
+   IMPORTANTE: en esa copia NO metas las carpetas «datos», «perfiles», «registros» ni «descargas»
+   (tienen tus reportes, lo descargado y la sesión abierta de tu navegador). El instalador no las
+   instala en el otro equipo, pero si van dentro del .zip, la otra persona las recibe igual.
+   Lo más fácil: copia la carpeta del bot, borra esas cuatro carpetas DE LA COPIA y comprime la copia.
+
+Opción B: pasa solo el archivo «Instalar Bot Web.cmd».
+   El instalador descarga el bot de GitHub (la rama main del proyecto). Para que funcione,
+   ese repositorio tiene que ser PÚBLICO y tener la última versión subida.
+
+
+Cómo instalarlo (lo que hace la otra persona)
+---------------------------------------------
+1. Si le llegó un .zip, primero «Extraer todo» (clic derecho sobre el .zip).
+2. Doble clic en «Instalar Bot Web.cmd» (dentro de la carpeta «instalador»).
+   - Si Windows avisa «Windows protegió su PC»: pulsar «Más información» y después «Ejecutar de todas formas».
+3. Esperar. Se abre una ventana negra que va diciendo los pasos:
+      [1/7] Comprobando Windows y la conexión a Internet...
+      [2/7] Buscando Python...            (si no hay, lo descarga e instala; tarda unos minutos)
+      [3/7] Copiando el bot...            (o «Descargando el bot de Internet...»)
+      [4/7] Preparando las piezas del bot...
+      [5/7] Buscando Chrome o Edge...
+      [6/7] Creando los accesos directos...
+      [7/7] Comprobando que todo funciona...
+4. Al final dice «¡Listo!» y pregunta «¿Abrir Bot Web ahora? (S/N)».
+5. Desde entonces se abre con el icono «Bot Web» del Escritorio o del menú Inicio.
+
+El bot queda en la carpeta  C:\Users\<usuario>\BotWeb\app
+Lo que descarga va a        C:\Users\<usuario>\BotWeb\app\descargas
+Si algo falla, el detalle está en  C:\Users\<usuario>\BotWeb\instalacion.log
+
+
+Actualizar
+----------
+Volver a abrir «Instalar Bot Web.cmd» (de una carpeta más nueva, o el mismo si descarga de GitHub).
+Cambia el programa pero CONSERVA los reportes, contraseñas, descargas y registros.
+
+
+Desinstalar
+-----------
+Menú Inicio > Bot Web > «Desinstalar Bot Web» (o el archivo «Desinstalar Bot Web.cmd»).
+Quita los accesos directos, las tareas programadas del bot y el programa.
+Pregunta aparte si borrar también los datos (por defecto se conservan). Python no se desinstala.

@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Informes - Informe de historial</title>
+<style>body { font-family: Segoe UI, Arial, sans-serif; margin: 30px; } td, th { border: 1px solid #999; padding: 4px 8px; }</style>
+</head>
+<body>
+  <h1>Informe de historial bancario</h1>
+  <div id="zona">Generando el informe…</div>
+  <script>
+    var q = new URLSearchParams(location.search);
+    setTimeout(function () {                    // el informe tarda un poco en dibujarse
+      var t = document.createElement('table');
+      t.id = 'informe';
+      t.innerHTML = '<thead><tr><th>Cuenta</th><th>Desde</th><th>Hasta</th><th>Saldo</th></tr></thead><tbody></tbody>';
+      var tr = document.createElement('tr');
+      ['cuenta', 'desde', 'hasta'].forEach(function (k) { var td = document.createElement('td'); td.textContent = q.get(k) || ''; tr.appendChild(td); });
+      var td = document.createElement('td'); td.textContent = '1000.00'; tr.appendChild(td);
+      t.querySelector('tbody').appendChild(tr);
+      var z = document.getElementById('zona'); z.textContent = ''; z.appendChild(t);
+    }, 300);
+  </script>
+</body>
+</html>

@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Portal de reportes - Reportes</title>
+<style>
+  body { font-family: Segoe UI, Arial, sans-serif; margin: 40px; }
+  .fila { display: flex; gap: 12px; align-items: center; margin-bottom: 14px; }
+  #resultado { border: 1px solid #999; padding: 14px; margin-top: 18px; display: none; }
+  #estado { color: #555; margin-top: 12px; min-height: 1.2em; }
+  #menu { position: fixed; display: none; background: #fff; border: 1px solid #888;
+          box-shadow: 2px 2px 8px rgba(0,0,0,.3); z-index: 50; }
+  #menu .item { padding: 6px 18px; cursor: pointer; }
+  #menu .item:hover { background: #dbeafe; }
+</style>
+</head>
+<body>
+  <h1>Reporte de ventas</h1>
+  <p><a id="ayuda" href="ayuda.html" target="_blank">Ayuda</a></p>
+  <div class="fila">
+    <label for="fecha">Fecha</label>
+    <input id="fecha" name="fecha" type="date">
+    <label for="cliente">Cliente</label>
+    <select id="cliente" name="cliente">
+      <option value="todos">Todos</option>
+      <option value="acme">Acme S.A.</option>
+      <option value="globex">Globex</option>
+    </select>
+    <button id="generar" type="button">Generar reporte</button>
+  </div>
+  <div id="estado"></div>
+  <div id="resultado">
+    <h2>Resultado</h2>
+    <p id="datos"></p>
+    <small>Haz clic derecho para exportar</small>
+  </div>
+  <div id="menu" role="menu">
+    <div class="item" role="menuitem" id="m-csv">Exportar CSV</div>
+    <div class="item" role="menuitem" id="m-copiar">Copiar</div>
+  </div>
+  <script>
+    if (!localStorage.getItem('sesion')) { location.href = 'index.html'; }
+    var menu = document.getElementById('menu');
+    var resultado = document.getElementById('resultado');
+    var ultimo = null;
+
+    document.getElementById('generar').addEventListener('click', function () {
+      var estado = document.getElementById('estado');
+      resultado.style.display = 'none';
+      estado.textContent = 'Generando reporte…';
+      var fecha = document.getElementById('fecha').value;
+      var cliente = document.getElementById('cliente').value;
+      setTimeout(function () {
+        ultimo = { fecha: fecha, cliente: cliente, total: 1234 };
+        document.getElementById('datos').textContent =
+          'Ventas de ' + cliente + ' el ' + fecha + ': ' + ultimo.total;
+        resultado.style.display = 'block';
+        estado.textContent = 'Reporte listo';
+      }, 2000);
+    });
+
+    resultado.addEventListener('contextmenu', function (e) {
+      e.preventDefault();
+      menu.style.left = e.clientX + 'px';
+      menu.style.top = e.clientY + 'px';
+      menu.style.display = 'block';
+    });
+    document.addEventListener('click', function () { menu.style.display = 'none'; });
+
+    document.getElementById('m-csv').addEventListener('click', function () {
+      var csv = 'fecha,cliente,total\n' + ultimo.fecha + ',' + ultimo.cliente + ',' + ultimo.total + '\n';
+      var blob = new Blob([csv], { type: 'text/csv' });
+      var a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'reporte_ventas.csv';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    });
+  </script>
+</body>
+</html>

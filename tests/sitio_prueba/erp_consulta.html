@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>ERP (prueba) - Consulta</title>
+<style>
+  body { font-family: Segoe UI, Arial, sans-serif; margin: 30px; }
+  .fila { margin-bottom: 12px; }
+  ul.menu, ul.menu ul { list-style: none; margin: 0; padding: 0; }
+  ul.menu > li { display: inline-block; position: relative; }
+  ul.menu a { display: block; padding: 6px 12px; background: #e5e7eb; color: #111; text-decoration: none; white-space: nowrap; }
+  ul.menu ul.sub { display: none; position: absolute; left: 0; top: 100%; background: #fff; border: 1px solid #999; min-width: 160px; }
+  ul.menu li:hover > ul.sub { display: block; }
+  #resultado { margin-top: 90px; }
+</style>
+</head>
+<body>
+<!--
+  Página tipo ERP «Consulta» (v3.2): lista nativa «Almacén», fecha y «Consultar»; el archivo sale de un menú que solo se
+  ve con el ratón encima: «Vista Exportar» → «Exportar» (descarga /api/erp/descarga).
+-->
+  <h1>Consulta de existencias</h1>
+  <form onsubmit="return false">
+    <div class="fila"><label for="almacen">Almacén</label>
+      <select id="almacen"><option>Central</option><option>Santiago</option><option>Este</option></select></div>
+    <div class="fila"><label for="fecha">Fecha de corte</label><input type="text" id="fecha" value="26/10/2026"></div>
+    <div class="fila"><button type="button" id="consultar">Consultar</button></div>
+  </form>
+  <ul class="menu" id="menu">
+    <li><a href="#" id="vista">Vista Exportar</a>
+      <ul class="sub"><li><a href="#" id="exportar">Exportar</a></li></ul>
+    </li>
+  </ul>
+  <div id="resultado"></div>
+  <script>
+    var consultado = '';
+    document.getElementById('consultar').addEventListener('click', function () {
+      consultado = document.getElementById('almacen').value + '|' + document.getElementById('fecha').value;
+      document.getElementById('resultado').textContent = 'Consulta: ' + consultado;
+    });
+    document.getElementById('exportar').addEventListener('click', function (e) {
+      e.preventDefault();
+      if (!consultado) return;
+      var p = consultado.split('|');
+      var a = document.createElement('a');
+      a.href = '/api/erp/descarga?almacen=' + encodeURIComponent(p[0]) + '&fecha=' + encodeURIComponent(p[1]);
+      a.setAttribute('download', ''); document.body.appendChild(a); a.click(); a.remove();
+    });
+  </script>
+</body>
+</html>

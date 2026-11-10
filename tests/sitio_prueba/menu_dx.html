@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Menú tipo DevExpress (submenús aparte)</title>
+<style>
+  body { font-family: Segoe UI, Arial, sans-serif; margin: 30px; }
+  .dxm-main ul { list-style: none; margin: 0; padding: 0; }
+  .dxm-main li.dxm-item { display: inline-block; margin-right: 4px; }
+  .dxm-item .dxm-content { padding: 6px 12px; background: #e5e7eb; cursor: default; white-space: nowrap; }
+  .dxm-item.dxm-hovered .dxm-content { background: #c7d2fe; }
+  /* Los submenús son divs aparte, al final del formulario, colocados con position:absolute. */
+  .dxm-popup { display: none; position: absolute; background: #fff; border: 1px solid #999; min-width: 220px; z-index: 10; }
+  .dxm-popup ul { list-style: none; margin: 0; padding: 0; }
+  .dxm-popup li.dxm-item { display: block; margin: 0; }
+  #resultado { margin-top: 160px; font-weight: 600; }
+</style>
+</head>
+<body>
+<form id="aspnetForm">
+  <h1>ERP de prueba (DevExpress)</h1>
+  <div id="ctl00_menuPrincipal" class="dxm-main dxm-horizontal">
+    <ul class="dx dxm-noImages">
+      <li id="ctl00_menuPrincipal_DXI0_" class="dxm-item" data-popup="ctl00_menuPrincipal_DXM0_"><div class="dxm-content" id="ctl00_menuPrincipal_DXI0_T"><span class="dx-vam">Archivo</span></div></li>
+      <li id="ctl00_menuPrincipal_DXI1_" class="dxm-item" data-popup="ctl00_menuPrincipal_DXM1_"><div class="dxm-content" id="ctl00_menuPrincipal_DXI1_T"><span class="dx-vam">Inventario</span></div></li>
+    </ul>
+  </div>
+  <div id="resultado"></div>
+
+  <div id="ctl00_menuPrincipal_DXM0_" class="dxm-popup"><ul>
+    <li id="ctl00_menuPrincipal_DXI0i0_" class="dxm-item"><div class="dxm-content" id="ctl00_menuPrincipal_DXI0i0_T"><span class="dx-vam">Salir</span></div></li>
+  </ul></div>
+  <div id="ctl00_menuPrincipal_DXM1_" class="dxm-popup"><ul>
+    <li id="ctl00_menuPrincipal_DXI1i0_" class="dxm-item"><div class="dxm-content" id="ctl00_menuPrincipal_DXI1i0_T"><span class="dx-vam">Registro De Asistencia</span></div></li>
+    <li id="ctl00_menuPrincipal_DXI1i1_" class="dxm-item"><div class="dxm-content" id="ctl00_menuPrincipal_DXI1i1_T"><span class="dx-vam">Existencias</span></div></li>
+  </ul></div>
+</form>
+<script>
+  // ?sin_ids=1 quita los ids de estilo DevExpress (para probar la exploración genérica de menús).
+  if (/sin_ids=1/.test(location.search)) {
+    document.querySelectorAll('[id^="ctl00_menuPrincipal_DX"]').forEach(function (e, i) {
+      if (e.classList.contains('dxm-popup')) e.dataset.popupId = e.id;
+      e.removeAttribute('id');
+    });
+  }
+  // ?cerrar_ms=N: el submenú se cierra solo N ms después de abrirse (como si la página se refrescara).
+  var cerrarMs = parseInt((location.search.match(/cerrar_ms=(\d+)/) || [0, 0])[1], 10);
+  var temporizador = null;
+  function popupDe(li) {
+    var id = li.getAttribute('data-popup');
+    return document.getElementById(id) || document.querySelector('[data-popup-id="' + id + '"]');
+  }
+  function ocultarTodo() {
+    document.querySelectorAll('.dxm-popup').forEach(function (p) { p.style.display = 'none'; });
+    document.querySelectorAll('.dxm-main .dxm-item').forEach(function (li) { li.classList.remove('dxm-hovered'); });
+  }
+  function ocultarLuego() {
+    clearTimeout(temporizador);
+    temporizador = setTimeout(ocultarTodo, 300);     // como DevExpress: se cierra poco después de salir
+  }
+  document.querySelectorAll('.dxm-main .dxm-item').forEach(function (li) {
+    li.addEventListener('mouseenter', function () {
+      clearTimeout(temporizador);
+      ocultarTodo();
+      li.classList.add('dxm-hovered');
+      var p = popupDe(li), r = li.getBoundingClientRect();
+      p.style.left = (r.left + window.scrollX) + 'px';
+      p.style.top = (r.bottom + window.scrollY) + 'px';
+      p.style.display = 'block';
+      if (cerrarMs) setTimeout(ocultarTodo, cerrarMs);
+    });
+    li.addEventListener('mouseleave', ocultarLuego);
+  });
+  document.querySelectorAll('.dxm-popup').forEach(function (p) {
+    p.addEventListener('mouseenter', function () { clearTimeout(temporizador); });
+    p.addEventListener('mouseleave', ocultarLuego);
+    p.addEventListener('click', function (e) {
+      var c = e.target.closest('.dxm-content');
+      if (!c) return;
+      document.getElementById('resultado').textContent = 'Elegido: ' + c.textContent.trim();
+      ocultarTodo();
+    });
+  });
+</script>
+</body>
+</html>

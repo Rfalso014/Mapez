@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Portal (prueba v3.3) - Abre el reporte en otra pestaña</title>
+<style>body { font-family: Segoe UI, Arial, sans-serif; margin: 30px; }</style>
+</head>
+<body>
+<!--
+  v3.3: portal cuyo enlace abre el reporte en una PESTAÑA NUEVA (target=_blank).  Esta pestaña también tiene controles
+  (buscador y una lista de idioma): si el bot mapeara la pestaña equivocada, saldrían estos.  Con ?auto=1 la propia
+  página abre la pestaña nueva a los 400 ms (como si el usuario pulsara el enlace).
+-->
+  <h1>Portal de reportes</h1>
+  <form onsubmit="return false">
+    <label for="buscar">Buscar en el portal</label> <input type="text" id="buscar">
+    <label for="idioma">Idioma</label> <select id="idioma"><option>Español</option><option>English</option></select>
+  </form>
+  <p><a href="informes2_historial.html" target="_blank" id="abrir">Abrir el Historial Bancario (pestaña nueva)</a></p>
+  <script>
+    if (new URLSearchParams(location.search).get('auto') === '1') {
+      setTimeout(function () { window.open('informes2_historial.html', '_blank'); }, 400);
+    }
+  </script>
+</body>
+</html>

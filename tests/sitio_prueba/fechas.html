@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Portal de reportes - Fechas</title>
+<style>
+  body { font-family: Segoe UI, Arial, sans-serif; margin: 40px; }
+  .grupo { display: flex; gap: 6px; align-items: center; margin-bottom: 14px; }
+  .grupo input { width: 120px; }
+  .addon { cursor: pointer; border: 1px solid #999; padding: 2px 8px; border-radius: 4px; }
+  .fa-calendar::before { content: "[cal]"; font-style: normal; }   /* icono sin texto, como en Font Awesome */
+  .mi-datepicker span { display: inline-block; width: 52px; padding: 4px 0; text-align: center; cursor: pointer; }
+  .mi-datepicker span:hover { background: #dbeafe; }
+</style>
+</head>
+<body>
+  <h1>Historial de banco</h1>
+  <div class="grupo" id="g_ini">
+    <label for="f_ini">Fecha inicial</label>
+    <input id="f_ini" name="f_ini" type="text" readonly>
+    <span class="addon"><i class="fa fa-calendar"></i></span>
+  </div>
+  <div class="grupo" id="g_fin">
+    <label for="f_fin">Fecha final</label>
+    <input id="f_fin" name="f_fin" type="text" readonly>
+    <span class="addon"><i class="glyphicon glyphicon-th">cal</i></span>
+  </div>
+  <button id="ver" type="button">Ver reporte</button>
+  <div id="rango"></div>
+  <script>
+    // Selector de fechas propio: se añade al <body> (dos instancias; la segunda se crea primero, así que
+    // el orden en el DOM no coincide con el de la pantalla) y re-dibuja cada vista con un pequeño retraso.
+    var MESES = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
+    var pickers = [];
+    function pad(n) { return (n < 10 ? '0' : '') + n; }
+
+    function crear(input) {
+      var dp = document.createElement('div');
+      dp.className = 'mi-datepicker';
+      dp.style.cssText = 'position:absolute;display:none;z-index:1000;background:#fff;border:1px solid #888;padding:8px;width:260px';
+      dp.innerHTML = '<div class="mi-dp-titulo">Elegir fecha</div><div class="mi-dp-anios"></div>' +
+                     '<div class="mi-dp-meses"></div><div class="mi-dp-dias"></div>';
+      document.body.appendChild(dp);
+      var estado = { anio: 0, mes: 0 };
+      var vistas = { anios: dp.querySelector('.mi-dp-anios'), meses: dp.querySelector('.mi-dp-meses'), dias: dp.querySelector('.mi-dp-dias') };
+      function ver(nombre) {
+        Object.keys(vistas).forEach(function (k) { vistas[k].style.display = 'none'; vistas[k].innerHTML = ''; });
+        setTimeout(function () {                       // re-dibujado con retraso (animación)
+          var html = '';
+          if (nombre === 'anios') for (var a = 2018; a <= 2029; a++) html += '<span class="anio">' + a + '</span>';
+          if (nombre === 'meses') MESES.forEach(function (m) { html += '<span class="mes">' + m + '</span>'; });
+          if (nombre === 'dias') for (var d = 1; d <= 31; d++) html += '<span class="dia">' + d + '</span>';
+          vistas[nombre].innerHTML = html;
+          vistas[nombre].style.display = 'block';
+        }, 250);
+      }
+      dp.addEventListener('click', function (e) {
+        var c = e.target.className;
+        if (c === 'anio') { estado.anio = parseInt(e.target.textContent, 10); ver('meses'); }
+        else if (c === 'mes') { estado.mes = MESES.indexOf(e.target.textContent) + 1; ver('dias'); }
+        else if (c === 'dia') {
+          input.value = estado.anio + '-' + pad(estado.mes) + '-' + pad(parseInt(e.target.textContent, 10));   // sin eventos
+          dp.style.display = 'none';
+        }
+      });
+      pickers.push(dp);
+      return { dp: dp, abrir: function () {
+        pickers.forEach(function (p) { p.style.display = 'none'; });
+        var r = input.getBoundingClientRect();
+        dp.style.left = (r.left + window.scrollX) + 'px';
+        dp.style.top = (r.bottom + window.scrollY + 4) + 'px';
+        dp.style.display = 'block';
+        ver('anios');
+      } };
+    }
+    var fin = crear(document.getElementById('f_fin'));      // primero la «final»: orden del DOM distinto al de pantalla
+    var ini = crear(document.getElementById('f_ini'));
+    document.querySelector('#g_ini .addon').addEventListener('click', ini.abrir);
+    document.querySelector('#g_fin .addon').addEventListener('click', fin.abrir);
+    document.getElementById('ver').addEventListener('click', function () {
+      document.getElementById('rango').textContent =
+        'Rango: ' + document.getElementById('f_ini').value + ' a ' + document.getElementById('f_fin').value;
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Portal de reportes - Varios reportes</title>
+<style>body { font-family: Segoe UI, Arial, sans-serif; margin: 40px; } button { margin-right: 10px; }</style>
+</head>
+<body>
+  <h1>Varios reportes</h1>
+  <button id="d1" type="button">Descargar ventas</button>
+  <button id="d2" type="button">Descargar clientes</button>
+  <script>
+    function bajar(nombre, texto) {
+      var blob = new Blob([texto], { type: 'text/csv' });
+      var a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = nombre;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    }
+    document.getElementById('d1').addEventListener('click', function () { bajar('ventas.csv', 'tipo,total\nventas,100\n'); });
+    document.getElementById('d2').addEventListener('click', function () { bajar('clientes.csv', 'tipo,total\nclientes,7\n'); });
+  </script>
+</body>
+</html>

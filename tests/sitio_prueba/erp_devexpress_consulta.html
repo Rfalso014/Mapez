@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>ERP (prueba v3.8) - Registro de asistencia</title>
+<style>
+  body { font-family: Segoe UI, Arial, sans-serif; margin: 8px; font-size: 13px; }
+  table.dxeButtonEditSys, table.dxeTextBoxSys { border: 1px solid #999; border-collapse: collapse; display: inline-table; }
+  table.dxeButtonEditSys td, table.dxeTextBoxSys td { padding: 0; }
+  .dxeButtonEditButton { width: 18px; text-align: center; background: #ddd; cursor: pointer; }
+  .dxpcDropDown { position: absolute; background: #fff; border: 1px solid #666; z-index: 5; }
+  .dxeListBoxItem { padding: 3px 8px; cursor: pointer; }
+  .dxm-main ul { list-style: none; margin: 0; padding: 0; }
+  .dxm-main > ul > li { display: inline-block; vertical-align: middle; margin-right: 8px; }
+  .dxm-content { padding: 4px 8px; cursor: pointer; white-space: nowrap; }
+  .dxgvControl { border-collapse: collapse; margin-top: 8px; }
+  .dxgvControl td { border: 1px solid #ccc; padding: 2px 4px; }
+  .dxICheckBox { display: inline-block; width: 13px; height: 13px; border: 1px solid #555; vertical-align: middle; cursor: pointer; }
+  .dxWeb_edtCheckBoxChecked { background: #1f6feb; }
+  .dxAIFFE { position: absolute; opacity: 0; width: 1px; height: 1px; border: 0; padding: 0; }
+  .lupa { display: inline-block; width: 16px; height: 16px; }
+  .dxlpLoadingPanel { display: none; }
+</style>
+</head>
+<body>
+<!--
+  v3.8: la consulta del ERP real, como la dibuja DevExpress (ids de ASP.NET):
+  - Fecha Desde / Hasta: ASPxDateEdit («…_I», botón «…_B-1» y calendario oculto «…_DDD_C»).
+  - Empleado / Ubicación: campo de búsqueda DOBLE: código (ASPxTextBox «wbe…_txtCod»), id oculto («…_txtId») y
+    descripción (ASPxButtonEdit «…_txtDescrip» de solo lectura con la lupa «…_B0»).  NO son listas.
+  - Barra de la rejilla: «Vista» y el formato (XLSX) son ASPxComboBox dentro de un menú DevExpress; delante del formato
+    hay un panel de carga oculto con el texto «Espere…»; «Exportar» y «Consultar» son opciones del menú.
+  - Rejilla ASPxGridView con su fila de filtros por columna («…_DXFREditorcolN»): no son filtros del reporte.
+  - «Ver bajas»: ASPxCheckBox (un <span> con la clase …Checked/…Unchecked y un <input> oculto «…_S» con C/U).
+  «Exportar» descarga /api/erp/descarga?almacen=<empleado>|<ubicación>|<bajas>&fecha=<desde>-<hasta>.
+-->
+  <table>
+    <tr>
+      <td>Fecha Desde</td>
+      <td>
+        <table class="dxeButtonEditSys dxeButtonEdit" id="ctl00_formContent_dteFechaDesde"><tr>
+          <td><input type="text" class="dxeEditArea_DevEx dxeEditAreaSys" id="ctl00_formContent_dteFechaDesde_I" name="ctl00$formContent$dteFechaDesde" value="28/09/2026" style="border:0;width:90px"></td>
+          <td class="dxeButtonEditButton" id="ctl00_formContent_dteFechaDesde_B-1">▾</td>
+        </tr></table>
+        <div id="ctl00_formContent_dteFechaDesde_DDD_C" style="display:none">(calendario)</div>
+      </td>
+      <td>Hasta</td>
+      <td>
+        <table class="dxeButtonEditSys dxeButtonEdit" id="ctl00_formContent_dteFechaHasta"><tr>
+          <td><input type="text" class="dxeEditArea_DevEx dxeEditAreaSys" id="ctl00_formContent_dteFechaHasta_I" name="ctl00$formContent$dteFechaHasta" value="28/10/2026" style="border:0;width:90px"></td>
+          <td class="dxeButtonEditButton" id="ctl00_formContent_dteFechaHasta_B-1">▾</td>
+        </tr></table>
+        <div id="ctl00_formContent_dteFechaHasta_DDD_C" style="display:none">(calendario)</div>
+      </td>
+    </tr>
+    <tr>
+      <td>Empleado</td>
+      <td>
+        <table class="dxeTextBoxSys" id="wbeEmpleado_txtCod"><tr><td class="dxic"><input type="text" class="dxeEditArea_DevEx dxeEditAreaSys" id="wbeEmpleado_txtCod_I" name="ctl00$formContent$wbeEmpleado$txtCod" style="border:0;width:70px"></td></tr></table>
+      </td>
+      <td colspan="2">
+        <table class="dxeTextBoxSys" id="wbeEmpleado_txtId" style="display:none"><tr><td><input type="text" id="wbeEmpleado_txtId_I" name="ctl00$formContent$wbeEmpleado$txtId"></td></tr></table>
+        <table class="dxeButtonEditSys dxeButtonEdit" id="wbeEmpleado_txtDescrip"><tr>
+          <td class="dxic"><input type="text" class="dxeEditArea_DevEx dxeEditAreaSys" id="wbeEmpleado_txtDescrip_I" name="ctl00$formContent$wbeEmpleado$txtDescrip" readonly style="border:0;width:180px"></td>
+          <td class="dxeButtonEditButton" id="wbeEmpleado_txtDescrip_B0"><img class="dxEditors_edtEllipsis lupa" id="wbeEmpleado_txtDescrip_B0Img" alt="" src="data:image/gif;base64,R0lGODlhAQABAAAAACw="></td>
+        </tr></table>
+      </td>
+    </tr>
+    <tr>
+      <td>Ubicación</td>
+      <td>
+        <table class="dxeTextBoxSys" id="wbeUbicacion_txtCod"><tr><td class="dxic"><input type="text" class="dxeEditArea_DevEx dxeEditAreaSys" id="wbeUbicacion_txtCod_I" name="ctl00$formContent$wbeUbicacion$txtCod" style="border:0;width:70px"></td></tr></table>
+      </td>
+      <td colspan="2">
+        <table class="dxeTextBoxSys" id="wbeUbicacion_txtId" style="display:none"><tr><td><input type="text" id="wbeUbicacion_txtId_I" name="ctl00$formContent$wbeUbicacion$txtId"></td></tr></table>
+        <table class="dxeButtonEditSys dxeButtonEdit" id="wbeUbicacion_txtDescrip"><tr>
+          <td class="dxic"><input type="text" class="dxeEditArea_DevEx dxeEditAreaSys" id="wbeUbicacion_txtDescrip_I" name="ctl00$formContent$wbeUbicacion$txtDescrip" readonly style="border:0;width:180px"></td>
+          <td class="dxeButtonEditButton" id="wbeUbicacion_txtDescrip_B0"><img class="dxEditors_edtEllipsis lupa" id="wbeUbicacion_txtDescrip_B0Img" alt="" src="data:image/gif;base64,R0lGODlhAQABAAAAACw="></td>
+        </tr></table>
+      </td>
+    </tr>
+  </table>
+
+  <div id="mainFormPage">
+    <div class="dxm-main dxm-horizontal" id="ctl00_formContent_wuc_1000_01_GridViewToolbar1_wuc100001_mainMenu">
+      <ul>
+        <li class="dxm-item dxm-noImage dxm-tmpl" id="ctl00_formContent_wuc_1000_01_GridViewToolbar1_wuc100001_mainMenu_DXI0_">
+          <table><tr><td>Vista</td><td>
+            <table class="dxeButtonEditSys dxeButtonEdit" id="ctl00_formContent_wuc_1000_01_GridViewToolbar1_wuc100001_mainMenu_ITCNT0_cbo0"><tr>
+              <td><input type="text" class="dxeEditArea dxeEditAreaSys" id="ctl00_formContent_wuc_1000_01_GridViewToolbar1_wuc100001_mainMenu_ITCNT0_cbo0_I" value="TODOS LOS CAMPOS" readonly style="border:0;width:170px"></td>
+              <td class="dxeButtonEditButton" id="ctl00_formContent_wuc_1000_01_GridViewToolbar1_wuc100001_mainMenu_ITCNT0_cbo0_B-1">▾</td>
+            </tr></table>
+            <div class="dxpcDropDown" id="ctl00_formContent_wuc_1000_01_GridViewToolbar1_wuc100001_mainMenu_ITCNT0_cbo0_DDD_PW-1" style="display:none">
+              <table class="dxeListBox" id="ctl00_formContent_wuc_1000_01_GridViewToolbar1_wuc100001_mainMenu_ITCNT0_cbo0_DDD_L"><tbody>
+                <tr><td class="dxeListBoxItem">TODOS LOS CAMPOS</td></tr><tr><td class="dxeListBoxItem">RESUMEN</td></tr>
+              </tbody></table>
+            </div>
+          </td></tr></table>
+        </li>
+        <li class="dxm-item dxm-noImage dxm-tmpl" id="ctl00_formContent_wuc_1000_01_GridViewToolbar1_wuc100001_mainMenu_DXI4_">
+          <table><tr><td><div class="dxlpLoadingPanel" id="ctl00_formContent_wuc_1000_01_LoadingPanel"><span>Espere…</span></div></td><td>
+            <table class="dxeButtonEditSys dxeButtonEdit" id="ctl00_formContent_wuc_1000_01_GridViewToolbar1_wuc100001_mainMenu_ITCNT4_cbo4"><tr>
+              <td><input type="text" class="dxeEditArea dxeEditAreaSys" id="ctl00_formContent_wuc_1000_01_GridViewToolbar1_wuc100001_mainMenu_ITCNT4_cbo4_I" value="XLSX" readonly style="border:0;width:50px"></td>
+              <td class="dxeButtonEditButton" id="ctl00_formContent_wuc_1000_01_GridViewToolbar1_wuc100001_mainMenu_ITCNT4_cbo4_B-1">▾</td>
+            </tr></table>
+            <div class="dxpcDropDown" id="ctl00_formContent_wuc_1000_01_GridViewToolbar1_wuc100001_mainMenu_ITCNT4_cbo4_DDD_PW-1" style="display:none">
+              <table class="dxeListBox" id="ctl00_formContent_wuc_1000_01_GridViewToolbar1_wuc100001_mainMenu_ITCNT4_cbo4_DDD_L"><tbody>
+                <tr><td class="dxeListBoxItem">XLSX</td></tr><tr><td class="dxeListBoxItem">PDF</td></tr><tr><td class="dxeListBoxItem">CSV</td></tr>
+              </tbody></table>
+            </div>
+          </td></tr></table>
+        </li>
+        <li class="dxm-item" id="ctl00_formContent_wuc_1000_01_GridViewToolbar1_wuc100001_mainMenu_DXI5_"><div class="dxm-content"><span class="dx-vam">Exportar</span></div></li>
+        <li class="dxm-item" id="ctl00_formContent_wuc_1000_01_GridViewToolbar1_wuc100001_mainMenu_DXI6_"><div class="dxm-content"><span class="dx-vam">Consultar</span></div></li>
+      </ul>
+    </div>
+  </div>
+
+  <table class="dxgvControl" id="ctl00_formContent_grdListado">
+    <tr id="ctl00_formContent_grdListado_DXHeadersRow0">
+      <td class="dxgvHeader" id="ctl00_formContent_grdListado_col0">Codigo</td>
+      <td class="dxgvHeader" id="ctl00_formContent_grdListado_col1">Apellido</td>
+      <td class="dxgvHeader" id="ctl00_formContent_grdListado_col2">Nombre</td>
+      <td class="dxgvHeader" id="ctl00_formContent_grdListado_col3">Ubicación</td>
+      <td class="dxgvHeader" id="ctl00_formContent_grdListado_col4">Fecha</td>
+      <td class="dxgvHeader" id="ctl00_formContent_grdListado_col5">Hora</td>
+    </tr>
+    <tr id="ctl00_formContent_grdListado_DXFilterRow" class="dxgvFilterRow">
+      <td><table class="dxeTextBoxSys" id="ctl00_formContent_grdListado_DXFREditorcol0"><tr><td><input type="text" id="ctl00_formContent_grdListado_DXFREditorcol0_I" style="width:90px"></td></tr></table></td>
+      <td><table class="dxeTextBoxSys" id="ctl00_formContent_grdListado_DXFREditorcol1"><tr><td><input type="text" id="ctl00_formContent_grdListado_DXFREditorcol1_I" style="width:90px"></td></tr></table></td>
+      <td><table class="dxeTextBoxSys" id="ctl00_formContent_grdListado_DXFREditorcol2"><tr><td><input type="text" id="ctl00_formContent_grdListado_DXFREditorcol2_I" style="width:90px"></td></tr></table></td>
+      <td><table class="dxeTextBoxSys" id="ctl00_formContent_grdListado_DXFREditorcol3"><tr><td><input type="text" id="ctl00_formContent_grdListado_DXFREditorcol3_I" style="width:90px"></td></tr></table></td>
+      <td>
+        <table class="dxeButtonEditSys dxeButtonEdit" id="ctl00_formContent_grdListado_DXFREditorcol4"><tr>
+          <td><input type="text" id="ctl00_formContent_grdListado_DXFREditorcol4_I" style="border:0;width:80px"></td>
+          <td class="dxeButtonEditButton" id="ctl00_formContent_grdListado_DXFREditorcol4_B-1">▾</td>
+        </tr></table>
+        <div id="ctl00_formContent_grdListado_DXFREditorcol4_DDD_C" style="display:none">(calendario)</div>
+      </td>
+      <td><table class="dxeTextBoxSys" id="ctl00_formContent_grdListado_DXFREditorcol5"><tr><td><input type="text" id="ctl00_formContent_grdListado_DXFREditorcol5_I" style="width:90px"></td></tr></table></td>
+    </tr>
+    <tr><td colspan="6" style="text-align:center;color:#666">No hay datos para mostrar</td></tr>
+    <tr id="ctl00_formContent_grdListado_FooterRow"><td colspan="6">
+      <span class="dxeBase_DevEx" id="ctl00_formContent_grdListado_FooterRow_chkRegistrosBaja">
+        <span class="dxichCellSys"><span class="dxICheckBox dxichSys dxWeb_edtCheckBoxUnchecked" id="ctl00_formContent_grdListado_FooterRow_chkRegistrosBaja_S_D"><input type="text" class="dxAIFFE" id="ctl00_formContent_grdListado_FooterRow_chkRegistrosBaja_S" name="ctl00$formContent$grdListado$FooterRow$chkRegistrosBaja" value="U" readonly></span></span>
+        <span class="dxichTextCellSys"><label>Ver bajas</label></span>
+      </span>
+    </td></tr>
+  </table>
+  <div id="resultado" style="margin-top:10px"></div>
+  <script>
+    // ASPxComboBox (Vista y formato): abrir con el campo o el botón «…_B-1», elegir una fila
+    ['ITCNT0_cbo0', 'ITCNT4_cbo4'].forEach(function (k) {
+      var base = 'ctl00_formContent_wuc_1000_01_GridViewToolbar1_wuc100001_mainMenu_' + k;
+      var caja = document.getElementById(base), input = document.getElementById(base + '_I');
+      var pop = document.getElementById(base + '_DDD_PW-1');
+      function abrir() { var r = caja.getBoundingClientRect(); pop.style.left = r.left + 'px'; pop.style.top = (r.bottom + scrollY) + 'px'; pop.style.display = 'block'; }
+      function alternar() { pop.style.display === 'block' ? pop.style.display = 'none' : abrir(); }
+      input.addEventListener('mousedown', alternar);
+      document.getElementById(base + '_B-1').addEventListener('mousedown', alternar);
+      pop.querySelectorAll('.dxeListBoxItem').forEach(function (td) {
+        td.addEventListener('click', function () { input.value = td.textContent; pop.style.display = 'none'; });
+      });
+    });
+    document.addEventListener('keydown', function (e) { if (e.key === 'Escape') document.querySelectorAll('.dxpcDropDown').forEach(function (p) { p.style.display = 'none'; }); });
+    // Campo doble: al escribir el código, el ERP rellena el id y la descripción
+    ['wbeEmpleado', 'wbeUbicacion'].forEach(function (w) {
+      var cod = document.getElementById(w + '_txtCod_I');
+      cod.addEventListener('input', function () {
+        document.getElementById(w + '_txtId_I').value = cod.value ? '9' + cod.value : '';
+        document.getElementById(w + '_txtDescrip_I').value = cod.value ? 'DESCRIPCION ' + cod.value : '';
+      });
+      document.getElementById(w + '_txtDescrip_B0').addEventListener('click', function () { window.lupaAbierta = w; });
+    });
+    // ASPxCheckBox «Ver bajas»
+    var chk = document.getElementById('ctl00_formContent_grdListado_FooterRow_chkRegistrosBaja_S_D');
+    var chkVal = document.getElementById('ctl00_formContent_grdListado_FooterRow_chkRegistrosBaja_S');
+    chk.addEventListener('click', function () {
+      var marcada = /Unchecked/.test(chk.className);
+      chk.className = 'dxICheckBox dxichSys ' + (marcada ? 'dxWeb_edtCheckBoxChecked' : 'dxWeb_edtCheckBoxUnchecked');
+      chkVal.value = marcada ? 'C' : 'U';
+    });
+    var consultado = '';
+    var menu = 'ctl00_formContent_wuc_1000_01_GridViewToolbar1_wuc100001_mainMenu_';
+    function v(id) { return document.getElementById(id).value; }
+    document.getElementById(menu + 'DXI6_').addEventListener('click', function () {
+      consultado = [v('wbeEmpleado_txtCod_I'), v('wbeUbicacion_txtCod_I'), chkVal.value].join('|') + '#' +
+        v('ctl00_formContent_dteFechaDesde_I') + '-' + v('ctl00_formContent_dteFechaHasta_I');
+      document.getElementById('resultado').textContent = 'Consulta: ' + consultado;
+    });
+    document.getElementById(menu + 'DXI5_').addEventListener('click', function () {
+      if (!consultado) return;
+      var p = consultado.split('#');
+      var a = document.createElement('a');
+      a.href = '/api/erp/descarga?almacen=' + encodeURIComponent(p[0]) + '&fecha=' + encodeURIComponent(p[1]);
+      a.setAttribute('download', ''); document.body.appendChild(a); a.click(); a.remove();
+    });
+  </script>
+</body>
+</html>

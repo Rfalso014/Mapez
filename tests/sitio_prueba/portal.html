@@ -1,0 +1,235 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Portal (prueba) - Reportes</title>
+<style>
+  body { font-family: Segoe UI, Arial, sans-serif; margin: 0; }
+  #app { padding: 24px 32px; }
+  .v-tabs { display: flex; gap: 4px; border-bottom: 1px solid #ccc; margin-bottom: 18px; }
+  .v-tab { border: 0; background: none; padding: 10px 18px; cursor: pointer; font: inherit; }
+  .v-tab--selected { border-bottom: 3px solid #c00; font-weight: 600; }
+  .panel { display: none; }
+  .panel.activo { display: block; }
+  .fila { margin-bottom: 14px; width: 420px; }
+  .hint { font-size: 13px; color: #444; margin: 0 0 4px; }
+  .v-field { position: relative; border: 1px solid #888; border-radius: 4px; min-height: 44px; padding: 16px 34px 4px 10px;
+             cursor: pointer; box-sizing: border-box; }
+  .v-label { position: absolute; left: 10px; top: 2px; font-size: 12px; color: #555; pointer-events: none; }
+  .v-field__input { min-height: 20px; }
+  .v-field__input input { border: 0; outline: 0; width: 100%; font: inherit; background: transparent; }
+  .v-field__append-inner { position: absolute; right: 8px; top: 12px; }
+  .v-select__oculto { position: absolute; width: 1px; opacity: 0; border: 0; padding: 0; }   /* Vuetify: aria-label «Open» */
+  .v-overlay { position: fixed; inset: 0; pointer-events: none; z-index: 2000; }
+  .v-overlay__content { position: absolute; pointer-events: auto; background: #fff; border: 1px solid #999;
+                        box-shadow: 0 4px 10px rgba(0,0,0,.2); max-height: 180px; overflow-y: auto; }
+  .v-list-item { height: 36px; line-height: 36px; padding: 0 12px; cursor: pointer; white-space: nowrap; box-sizing: border-box; }
+  .v-list-item:hover { background: #eef2ff; }
+  .v-carga { position: fixed; inset: 0; background: rgba(255,255,255,.6); z-index: 3000; display: flex;
+             align-items: center; justify-content: center; }
+  .v-progress-circular { width: 48px; height: 48px; border: 5px solid #fca5a5; border-top-color: #c00; border-radius: 50%;
+                         animation: girar 1s linear infinite; }
+  @keyframes girar { to { transform: rotate(360deg); } }
+  #resultado { margin-top: 16px; font-weight: 600; }
+</style>
+</head>
+<body>
+<!--
+  Página tipo Portal (Vue/Vuetify) para las pruebas:
+  - Pestañas «Corte» / «Crédito y Cobros».
+  - Listas propias (v-select / v-autocomplete) cuyo menú se «teletransporta» a .v-overlay-container como
+    div.v-overlay.v-overlay--active.v-menu; al cerrarse, el menú SE QUEDA en el DOM con la clase --active (como en la
+    web real, que hacía esperar 30 s por paso a la versión 2.3).
+  - «Elegir corte» depende de «Seleccione reporte» (las opciones vienen de /api/portal/cortes) y su lista es
+    virtual: solo se dibujan las opciones que se ven (hay que desplazarla para leerlas todas).
+  - Como Vuetify 3, el campo de cada lista lleva aria-label="Open" (v3.1: el mapeador no debe usarlo como etiqueta).
+  - «Formato a Exportar»: lista nativa.  «Generar»: rueda de carga de verdad (v-progress-circular) durante ?ms= y
+    después descarga /api/portal/descarga.
+  - v3.2 ?boton=1: como la web real, «Generar» no descarga: al terminar se habilita el botón «Descargar».
+-->
+<div id="app">
+  <div class="v-tabs" role="tablist">
+    <button type="button" class="v-tab v-tab--selected" role="tab" aria-selected="true" data-panel="p-corte">Corte</button>
+    <button type="button" class="v-tab" role="tab" aria-selected="false" data-panel="p-credito">Crédito y Cobros</button>
+  </div>
+
+  <div class="panel activo" id="p-corte">
+    <form class="filtros" onsubmit="return false">
+      <div class="fila">
+        <p class="hint">Filtro por sistema</p>
+        <div class="v-input v-select" data-campo="sistema"><div class="v-field"><div class="v-field__input"><span class="v-select__selection-text"></span><input class="v-select__oculto" type="text" readonly aria-label="Open" title="Open" tabindex="-1"></div><div class="v-field__append-inner">▾</div></div></div>
+      </div>
+      <div class="fila">
+        <div class="v-input v-autocomplete" data-campo="reporte"><div class="v-field"><label class="v-label v-field-label">Seleccione reporte</label><div class="v-field__input"><input type="text" role="combobox" aria-expanded="false" autocomplete="off" readonly aria-label="Open"></div><div class="v-field__append-inner">▾</div></div></div>
+      </div>
+      <div class="fila">
+        <div class="v-input v-select" data-campo="corte"><div class="v-field"><label class="v-label v-field-label">Elegir corte</label><div class="v-field__input"><span class="v-select__selection-text"></span><input class="v-select__oculto" type="text" readonly aria-label="Open" title="Open" tabindex="-1"></div><div class="v-field__append-inner">▾</div></div></div>
+      </div>
+      <div class="fila">
+        <label for="formato">Formato a Exportar</label><br>
+        <select id="formato" name="formato"><option value="xlsx" selected>Excel</option><option value="pdf">PDF</option><option value="csv">CSV</option></select>
+      </div>
+      <div class="fila"><button type="button" id="generar" class="v-btn">Generar</button>
+        <button type="button" id="boton_descargar" class="v-btn" disabled style="display:none">Descargar</button></div>
+    </form>
+  </div>
+
+  <div class="panel" id="p-credito">
+    <div class="fila"><label for="fecha_credito">Fecha</label><br><input type="date" id="fecha_credito"></div>
+    <div class="fila"><label><input type="checkbox" id="solo_vencidos"> Solo vencidos</label></div>
+    <div class="fila"><button type="button" id="consultar">Consultar</button></div>
+  </div>
+  <div id="resultado"></div>
+</div>
+<div class="v-overlay-container"></div>
+<script>
+(function () {
+  var q = new URLSearchParams(location.search);
+  var msGenerar = parseInt(q.get('ms') || '1500', 10);
+  var conBoton = q.get('boton') === '1';
+  var botonDesc = document.getElementById('boton_descargar');
+  if (conBoton) botonDesc.style.display = '';
+  var urlDescarga = '';
+  botonDesc.addEventListener('click', function () {
+    if (botonDesc.disabled || !urlDescarga) return;
+    var a = document.createElement('a');
+    a.href = urlDescarga; a.setAttribute('download', '');
+    document.body.appendChild(a); a.click(); a.remove();
+  });
+  var contenedor = document.querySelector('.v-overlay-container');
+  var valores = { sistema: 'Portal', reporte: '', corte: '' };
+  var opciones = { sistema: ['Portal', 'Otro sistema'], reporte: ['Detalles Ventas Mayorista', 'Resumen de Ventas'], corte: [] };
+  var menus = {};
+  var abierto = null;
+  var nMenu = 30;
+  var ALTO = 36;
+
+  function campo(n) { return document.querySelector('[data-campo="' + n + '"]'); }
+  function pintar(n) {
+    var c = campo(n), v = valores[n];
+    var t = c.querySelector('.v-select__selection-text');
+    if (t) t.textContent = v;
+    var i = c.querySelector('input');
+    if (i) i.value = v;
+  }
+  function cerrar() {
+    if (!abierto) return;
+    var m = menus[abierto];
+    m.querySelector('.v-overlay__content').style.display = 'none';   // el menú se queda en el DOM, con --active
+    var i = campo(abierto).querySelector('input');
+    if (i) i.setAttribute('aria-expanded', 'false');
+    abierto = null;
+  }
+  function dibujar(n) {
+    var m = menus[n], lista = m.querySelector('.v-list'), cont = m.querySelector('.v-overlay__content');
+    var ops = opciones[n];
+    var virtual = n === 'corte';
+    var desde = 0, hasta = ops.length;
+    if (virtual) {                                   // lista virtual: solo las opciones que se ven (+1)
+      desde = Math.max(0, Math.floor(cont.scrollTop / ALTO) - 1);
+      hasta = Math.min(ops.length, desde + Math.ceil(180 / ALTO) + 2);
+    }
+    lista.style.height = (ops.length * ALTO) + 'px';
+    lista.style.position = 'relative';
+    lista.innerHTML = '';
+    for (var k = desde; k < hasta; k++) {
+      (function (k) {
+        var it = document.createElement('div');
+        it.className = 'v-list-item';
+        it.setAttribute('role', 'option');
+        it.style.position = 'absolute'; it.style.left = '0'; it.style.right = '0'; it.style.top = (k * ALTO) + 'px';
+        it.innerHTML = '<div class="v-list-item-title">' + ops[k] + '</div>';
+        it.addEventListener('mousedown', function (e) { e.preventDefault(); });
+        it.addEventListener('click', function () { elegir(n, ops[k]); });
+        lista.appendChild(it);
+      })(k);
+    }
+  }
+  function abrir(n) {
+    if (abierto && abierto !== n) cerrar();
+    var m = menus[n];
+    if (!m) {
+      m = document.createElement('div');
+      m.id = 'v-menu-v-' + (nMenu++);
+      m.className = 'v-overlay v-overlay--active v-overlay--absolute v-menu';
+      m.innerHTML = '<div class="v-overlay__content"><div class="v-list" role="listbox"></div></div>';
+      m.querySelector('.v-overlay__content').addEventListener('scroll', function () { dibujar(n); });
+      menus[n] = m;
+    }
+    var r = campo(n).querySelector('.v-field').getBoundingClientRect();
+    var cont = m.querySelector('.v-overlay__content');
+    cont.style.left = r.left + 'px'; cont.style.top = r.bottom + 'px'; cont.style.width = r.width + 'px';
+    cont.style.display = 'block';
+    cont.scrollTop = 0;
+    abierto = n;
+    setTimeout(function () {                         // se abre con una pequeña animación
+      if (abierto !== n) return;
+      if (!m.parentNode) contenedor.appendChild(m);
+      dibujar(n);
+      var i = campo(n).querySelector('input');
+      if (i) i.setAttribute('aria-expanded', 'true');
+    }, 80);
+  }
+  function cargarCortes() {
+    valores.corte = ''; pintar('corte'); opciones.corte = [];
+    if (!valores.reporte) return;
+    fetch('/api/portal/cortes?reporte=' + encodeURIComponent(valores.reporte), { cache: 'no-store' })
+      .then(function (r) { return r.json(); }).then(function (d) { opciones.corte = d.cortes || []; });
+  }
+  function elegir(n, v) {
+    valores[n] = v; pintar(n); cerrar();
+    if (n === 'reporte') cargarCortes();
+  }
+  ['sistema', 'reporte', 'corte'].forEach(function (n) {
+    pintar(n);
+    campo(n).querySelector('.v-field').addEventListener('mousedown', function (e) {
+      e.preventDefault();
+      if (abierto === n) cerrar(); else abrir(n);
+    });
+  });
+  document.addEventListener('mousedown', function (e) {
+    if (abierto && !e.target.closest('.v-overlay__content') && !e.target.closest('.v-input')) cerrar();
+  });
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') cerrar(); });
+  document.querySelectorAll('.v-tab').forEach(function (t) {
+    t.addEventListener('click', function () {
+      document.querySelectorAll('.v-tab').forEach(function (o) { o.classList.remove('v-tab--selected'); o.setAttribute('aria-selected', 'false'); });
+      t.classList.add('v-tab--selected'); t.setAttribute('aria-selected', 'true');
+      document.querySelectorAll('.panel').forEach(function (p) { p.classList.toggle('activo', p.id === t.dataset.panel); });
+    });
+  });
+  document.getElementById('generar').addEventListener('click', function () {
+    var res = document.getElementById('resultado');
+    if (!valores.reporte || !valores.corte) { res.textContent = 'Elige el reporte y el corte'; return; }
+    botonDesc.disabled = true;
+    var capa = document.createElement('div');
+    capa.className = 'v-overlay v-overlay--active v-carga';
+    capa.innerHTML = '<div class="v-progress-circular v-progress-circular--indeterminate" role="progressbar"></div>';
+    document.body.appendChild(capa);
+    setTimeout(function () {
+      capa.remove();
+      res.textContent = 'Reporte generado: ' + valores.reporte + ' / ' + valores.corte;
+      if (conBoton) {
+        urlDescarga = '/api/portal/descarga?reporte=' + encodeURIComponent(valores.reporte) + '&corte=' +
+          encodeURIComponent(valores.corte) + '&formato=' + document.getElementById('formato').value;
+        botonDesc.disabled = false;
+        return;
+      }
+      var a = document.createElement('a');
+      a.id = 'descargar';
+      a.textContent = 'Descargar';
+      a.href = '/api/portal/descarga?reporte=' + encodeURIComponent(valores.reporte) + '&corte=' +
+        encodeURIComponent(valores.corte) + '&formato=' + document.getElementById('formato').value;
+      a.setAttribute('download', '');
+      res.appendChild(document.createElement('br'));
+      res.appendChild(a);
+      a.click();
+    }, msGenerar);
+  });
+  document.getElementById('consultar').addEventListener('click', function () {
+    document.getElementById('resultado').textContent = 'Consulta del ' + document.getElementById('fecha_credito').value;
+  });
+})();
+</script>
+</body>
+</html>

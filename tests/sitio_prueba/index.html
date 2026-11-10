@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Portal de reportes - Iniciar sesión</title>
+<style>
+  body { font-family: Segoe UI, Arial, sans-serif; margin: 40px; }
+  form { display: grid; gap: 10px; max-width: 280px; }
+  #error { color: #b91c1c; min-height: 1.2em; }
+</style>
+</head>
+<body>
+  <h1>Portal de reportes</h1>
+  <form id="login">
+    <label for="usuario">Usuario</label>
+    <input id="usuario" name="usuario" type="text" autocomplete="off">
+    <label for="clave">Contraseña</label>
+    <input id="clave" name="clave" type="password" autocomplete="off">
+    <button type="submit">Entrar</button>
+    <div id="error"></div>
+  </form>
+  <script>
+    document.getElementById('login').addEventListener('submit', function (e) {
+      e.preventDefault();
+      var u = document.getElementById('usuario').value;
+      var c = document.getElementById('clave').value;
+      if (u === 'demo' && c === 'clave-de-prueba-123') {
+        localStorage.setItem('sesion', 'demo');
+        location.href = 'reportes.html';
+      } else {
+        document.getElementById('error').textContent = 'Usuario o contraseña incorrectos';
+      }
+    });
+  </script>
+</body>
+</html>

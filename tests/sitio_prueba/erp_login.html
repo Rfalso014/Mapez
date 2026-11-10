@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>ERP (prueba) - Iniciar sesión</title>
+<style>
+  body { font-family: Segoe UI, Arial, sans-serif; margin: 40px; }
+  td { padding: 6px; }
+  .dxb { display: inline-block; border: 1px solid #888; padding: 4px 14px; cursor: pointer; background: #eee; }
+  #ctl00_formContent_txtContrasenia_I { display: none; }
+  .dxpc-modalBackLite { position: fixed; inset: 0; background: rgba(0,0,0,.3); z-index: 100; display: none; }
+  .dxpc-mainDiv { position: fixed; left: 30%; top: 30%; width: 360px; background: #fff; border: 1px solid #555;
+                  z-index: 101; display: none; }
+  .dxpc-header { background: #c00; color: #fff; padding: 4px 8px; }
+  .dxpc-content { padding: 12px; }
+</style>
+</head>
+<body>
+  <h1>ERP</h1>
+  <!--
+    Página de inicio de sesión tipo ERP (ASP.NET + DevExpress) de las pruebas de la 3.3.1:
+    - «Licencia», «Usuario» (cajas ASPxTextBox: id ctl00_formContent_txtX_I, name ctl00$formContent$txtX) y la contraseña
+      de DevExpress: se ve un «clon» (…_txtContrasenia_I_CLND, de texto, con «Contraseña») y el campo real
+      (…_txtContrasenia_I, oculto) aparece al pulsar el clon.  Como DevExpress, la contraseña que se envía es la que el
+      campo real recibió con eventos «input» (poner .value a secas no basta).
+    - «Licencia» no lleva «required»: la comprueba el servidor, que contesta con una ventanita de DevExpress «Mensaje — El
+      campo LICENCIA esta vacio (es un dato obligatorio) [Aceptar]» (con una capa que tapa el formulario); con datos malos,
+      «Usuario o contraseña incorrectos».  Tras un intento fallido la contraseña se vacía y vuelve a verse el clon.
+    - Datos válidos: licencia L-77, usuario demo, contraseña clave-de-prueba-123.  Al entrar va a ?volver= (app.html).
+    - ?borra_licencia=1: el PRIMER envío llega sin la licencia aunque esté escrita (como si la web no la hubiera recibido).
+    Cada envío suma 1 a localStorage «envios_erp» y guarda «licencia|usuario|largo de la contraseña» en «ultimos_envios_erp».
+  -->
+  <form id="aspnetForm" onsubmit="return false">
+    <table>
+      <tr><td class="dxflCaption">Licencia</td>
+          <td><input id="ctl00_formContent_txtLicencia_I" name="ctl00$formContent$txtLicencia" type="text" autocomplete="off"></td></tr>
+      <tr><td class="dxflCaption">Usuario</td>
+          <td><input id="ctl00_formContent_txtUsuario_I" name="ctl00$formContent$txtUsuario" type="text" autocomplete="off"></td></tr>
+      <tr><td class="dxflCaption">Contraseña</td>
+          <td><input id="ctl00_formContent_txtContrasenia_I_CLND" type="text" value="Contraseña" readonly style="color:#999">
+              <input id="ctl00_formContent_txtContrasenia_I" name="ctl00$formContent$txtContrasenia" type="password" autocomplete="off"></td></tr>
+    </table>
+    <div class="dxb" id="ctl00_formContent_btnAceptar_CD"><span class="dx-vam">Aceptar</span></div>
+  </form>
+  <div class="dxpc-modalBackLite" id="capa"></div>
+  <div class="dxpc-mainDiv dxpcLite" id="ctl00_formContent_popMensaje_PW-1">
+    <div class="dxpc-header">Mensaje</div>
+    <div class="dxpc-content"><span id="texto_mensaje"></span><br><br>
+      <div class="dxb" id="ctl00_formContent_popMensaje_btnAceptar_CD"><span class="dx-vam">Aceptar</span></div></div>
+  </div>
+  <script>
+    var q = new URLSearchParams(location.search);
+    var volver = q.get('volver') || 'app.html';
+    var borraLicencia = q.get('borra_licencia') === '1';
+    var clon = document.getElementById('ctl00_formContent_txtContrasenia_I_CLND');
+    var real = document.getElementById('ctl00_formContent_txtContrasenia_I');
+    var estado = { clave: '' };            // lo que DevExpress «sabe» de la contraseña (solo con eventos input)
+    real.addEventListener('input', function () { estado.clave = real.value; });
+    function verClon() { real.value = ''; estado.clave = ''; real.style.display = 'none'; clon.style.display = 'inline'; }
+    clon.addEventListener('focus', function () { clon.style.display = 'none'; real.style.display = 'inline'; real.focus(); });
+    function mensaje(t) {
+      document.getElementById('texto_mensaje').textContent = t;
+      document.getElementById('capa').style.display = 'block';
+      document.getElementById('ctl00_formContent_popMensaje_PW-1').style.display = 'block';
+    }
+    document.getElementById('ctl00_formContent_popMensaje_btnAceptar_CD').addEventListener('click', function () {
+      document.getElementById('capa').style.display = 'none';
+      document.getElementById('ctl00_formContent_popMensaje_PW-1').style.display = 'none';
+    });
+    function entrar() {
+      var n = parseInt(localStorage.getItem('envios_erp') || '0', 10) + 1;
+      localStorage.setItem('envios_erp', String(n));
+      var l = document.getElementById('ctl00_formContent_txtLicencia_I').value.trim();
+      if (borraLicencia && n === 1) l = '';
+      var u = document.getElementById('ctl00_formContent_txtUsuario_I').value.trim();
+      var c = estado.clave;
+      var envios = JSON.parse(localStorage.getItem('ultimos_envios_erp') || '[]');
+      envios.push(l + '|' + u + '|' + c.length);
+      localStorage.setItem('ultimos_envios_erp', JSON.stringify(envios));
+      setTimeout(function () {             // «postback»
+        if (!l) { verClon(); mensaje('El campo LICENCIA esta vacio (es un dato obligatorio)'); return; }
+        if (l === 'L-77' && u === 'demo' && c === 'clave-de-prueba-123') {
+          localStorage.setItem('sesion_app', 'ok');
+          location.href = volver;
+          return;
+        }
+        verClon(); mensaje('Usuario o contraseña incorrectos');
+      }, 300);
+    }
+    document.getElementById('ctl00_formContent_btnAceptar_CD').addEventListener('click', entrar);
+  </script>
+</body>
+</html>

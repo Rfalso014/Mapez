@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Portal de reportes - Informe anterior</title>
+<style>body { font-family: Segoe UI, Arial, sans-serif; margin: 40px; } .marco { border: 1px solid #999; padding: 12px; }</style>
+</head>
+<body>
+  <h1>Informe</h1>
+  <!--
+    Ya hay un informe anterior en la página.  «Generar» lo sustituye por el nuevo tras ms (sin rueda ni capa).
+    Una espera grabada con un selector alternativo (ruta CSS) que ya coincidía con el informe anterior no debe
+    darse por buena al instante.
+  -->
+  <p><button id="generar" type="button">Generar</button></p>
+  <div class="marco"><div><div><p>ACME Detalles De Ventas Mayorista 23/10/2026 09:15 Canal anterior</p></div></div></div>
+  <script>
+    var ms = parseInt(new URLSearchParams(location.search).get('ms') || '2500', 10);
+    document.getElementById('generar').addEventListener('click', function () {
+      setTimeout(function () {
+        var m = document.querySelector('.marco');
+        m.innerHTML = '<div class="informe-nuevo"><div><p>ACME Detalles De Ventas Mayorista 24/10/2026 11:32 Canal nuevo</p></div></div>';
+      }, ms);
+    });
+  </script>
+</body>
+</html>

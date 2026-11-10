@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="es">
+<head><meta charset="utf-8"><title>Fecha con máscara (prueba)</title></head>
+<body>
+<!-- v3.6.1: imita la casilla de fecha de Informes: una máscara «__/__/____» que pone ella las barras.  Tecleada letra a
+     letra queda bien; si el texto llega entero de golpe (fill) lo desordena («30/10/2026» → «3010/2/026»).
+     Cuando tiene una fecha dd/mm/aaaa válida aparece «Fecha correcta: …».
+     ?iso=1: como la casilla REAL de Informes: la máscara es AAAA-MM-DD (viene con «2026-01-01») y reparte las cifras así
+     («30/10/2026» → «3010-20-26»). -->
+<label>Fecha Inicial <input id="fecha" type="text" autocomplete="off"></label>
+<div id="estado"></div>
+<script>
+const f = document.getElementById('fecha');
+const iso = new URLSearchParams(location.search).get('iso');
+if (iso) f.value = '2026-01-01';
+f.addEventListener('input', (e) => {
+  const d = f.value.replace(/\D/g, '').slice(0, 8);
+  if (iso) f.value = d.length > 6 ? d.slice(0, 4) + '-' + d.slice(4, 6) + '-' + d.slice(6) :
+                     d.length > 4 ? d.slice(0, 4) + '-' + d.slice(4) : d;
+  else if (e.data && e.data.length > 1) f.value = d.slice(0, 4) + '/' + d.slice(4, 5) + '/' + d.slice(5);
+  else f.value = d.length > 4 ? d.slice(0, 2) + '/' + d.slice(2, 4) + '/' + d.slice(4) :
+                 d.length > 2 ? d.slice(0, 2) + '/' + d.slice(2) : d;
+  const ok = iso ? /^\d{4}-\d\d-\d\d$/.test(f.value) : /^\d\d\/\d\d\/\d{4}$/.test(f.value);
+  document.getElementById('estado').replaceChildren();
+  if (ok) { const p = document.createElement('p'); p.id = 'ok'; p.textContent = 'Fecha correcta: ' + f.value; document.getElementById('estado').append(p); }
+});
+</script>
+</body>
+</html>

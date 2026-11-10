@@ -1,0 +1,3 @@
+# Los .cmd y .bat necesitan finales de línea de Windows (CRLF) para funcionar bien.
+*.cmd text eol=crlf
+*.bat text eol=crlf

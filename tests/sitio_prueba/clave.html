@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Portal de reportes - Clave con ojito</title>
+<style>body { font-family: Segoe UI, Arial, sans-serif; margin: 40px; } .fila { display: flex; gap: 8px; margin-bottom: 10px; }</style>
+</head>
+<body>
+  <h1>Iniciar sesión</h1>
+  <div class="fila">
+    <label for="pw">Contraseña</label>
+    <input id="pw" name="pw" type="password" autocomplete="off">
+    <button id="ojo" type="button" aria-label="appended action">ver</button>
+  </div>
+  <div class="fila">
+    <label for="otra">Otro secreto</label>
+    <input id="otra" name="otra" type="text" placeholder="Escribe tu contraseña aquí" autocomplete="off">
+  </div>
+  <button id="entrar" type="button">Entrar</button>
+  <div id="msg"></div>
+  <script>
+    // El «ojito» convierte el campo en texto normal (type=text): así se escribe la contraseña a la vista.
+    document.getElementById('ojo').addEventListener('click', function () {
+      var c = document.getElementById('pw');
+      c.type = (c.type === 'password') ? 'text' : 'password';
+    });
+    document.getElementById('entrar').addEventListener('click', function () {
+      var ok = document.getElementById('pw').value === 'clave-de-prueba-123';
+      document.getElementById('msg').textContent = ok ? 'Bienvenido' : 'Clave incorrecta';
+    });
+  </script>
+</body>
+</html>

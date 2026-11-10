@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Correo (prueba) - Outlook</title>
+<!-- v3.4: imita la estructura de Outlook en la web (solo lo que usa el bot): buscador (searchbox que reacciona al
+     teclado), filas [role=option][data-convid] con el asunto completo en el aria-label y la fecha en un title
+     («Thu 10/29/2026 9:07 AM»), panel de lectura con «Cuerpo del mensaje», tarjetas de adjuntos [role=option] con
+     «Más acciones» → «Descargar» y el botón partido «Descargar todo».  Sin sesión enseña el campo «loginfmt».
+     ?auto_login=MS  = el «usuario» inicia sesión solo pasados MS ms (para probar «Iniciar sesión en el correo»);
+     ?sin_menu=1     = el menú de la tarjeta no tiene «Descargar» (se usa «Descargar todo»).
+     v3.6: el buscador pierde las letras tecleadas muy seguidas (como el combobox de Outlook) y acepta el texto pegado;
+     ?teclado_ok=1 (no pierde letras), ?sin_insertar=1 (solo acepta un pegado con Ctrl+V), ?coma_falla=1 (una búsqueda
+     con una coma no encuentra nada). -->
+<style>
+  body { font-family: sans-serif; margin: 0; }
+  header { padding: 8px; background: #0f6cbd; }
+  .cuerpo { display: flex; }
+  [role=listbox] { width: 340px; border-right: 1px solid #ccc; max-height: 600px; overflow: auto; }
+  [role=option][data-convid] { padding: 6px; border-bottom: 1px solid #eee; cursor: pointer; white-space: nowrap; overflow: hidden; }
+  #ReadingPaneContainerId { flex: 1; padding: 10px; }
+  .tarjeta { display: inline-block; border: 1px solid #aaa; padding: 4px; margin: 2px; }
+  [role=menu] { position: absolute; background: #fff; border: 1px solid #999; }
+  [role=menuitem] { padding: 4px 10px; cursor: pointer; }
+</style>
+</head>
+<body>
+<div id="login" hidden>
+  <h1>Iniciar sesión</h1>
+  <input name="loginfmt" type="email" placeholder="Correo electrónico, teléfono o Skype">
+  <button type="button" id="siguiente">Siguiente</button>
+</div>
+<div id="app" hidden>
+  <header><input type="search" role="searchbox" aria-label="Buscar" placeholder="Buscar" id="buscar"></header>
+  <div class="cuerpo">
+    <div role="listbox" aria-label="Lista de mensajes" id="lista"></div>
+    <div id="ReadingPaneContainerId"></div>
+  </div>
+</div>
+<script>
+const params = new URLSearchParams(location.search);
+const $ = (s) => document.querySelector(s);
+const api = async (r) => (await fetch(r)).json();
+function el(tag, at, ...hijos) {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(at || {})) { if (k === 'onclick') e.onclick = v; else e.setAttribute(k, v); }
+  for (const h of hijos) e.append(h);
+  return e;
+}
+function mostrarLogin() {
+  $('#app').hidden = true; $('#login').hidden = false;
+  const auto = params.get('auto_login');
+  if (auto) setTimeout(async () => { await api('/api/correo/entrar'); cargar(''); }, parseInt(auto, 10) || 1000);
+}
+$('#siguiente').onclick = async () => { await api('/api/correo/entrar'); cargar(''); };
+async function cargar(q) {
+  // ?coma_falla=1 (v3.6): como temía Octopus, una búsqueda con una coma no encuentra nada
+  if (params.get('coma_falla') && (q || '').includes(',')) q = '__sin_resultados__ ' + q;
+  const d = await api('/api/correo/lista?modo=outlook&q=' + encodeURIComponent(q || ''));
+  if (d.login) { mostrarLogin(); return; }
+  $('#login').hidden = true; $('#app').hidden = false;
+  const lista = $('#lista');
+  lista.replaceChildren();
+  for (const m of d.mensajes) {
+    const asuntoCorto = m.asunto.length > 30 ? m.asunto.slice(0, 30) + '…' : m.asunto;     // recortado en pantalla
+    const fila = el('div', { role: 'option', 'data-convid': m.id, 'aria-selected': 'false',
+                             'aria-label': m.de_nombre + ' ' + m.asunto + ' ' + m.fecha_outlook + ' ' + m.vista },
+      // (?como_real=1: la fila del Outlook real no trae la dirección del remitente)
+      el('div', null, el('span', { title: params.get('como_real') ? m.de_nombre : m.de_correo }, m.de_nombre)),
+      el('div', null, el('span', { class: 'asunto' }, asuntoCorto), ' ', el('span', { title: m.fecha_outlook }, m.corta)),
+      el('div', { class: 'vista' }, m.vista));
+    if (m.adjuntos.length) fila.append(el('i', { 'data-icon-name': 'Attach', title: 'Tiene datos adjuntos' }, '📎'));
+    fila.onclick = () => abrir(m.id, fila);
+    lista.append(fila);
+  }
+}
+$('#buscar').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') { const q = $('#buscar').value; setTimeout(() => { location.hash = 'search'; cargar(q); }, 300); }
+});
+// v3.6: el buscador se porta como el combobox de Outlook: cada letra tecleada abre las sugerencias y las que llegan muy
+// seguidas (menos de 120 ms después de la anterior) se PIERDEN (así fallaba el bot al teclear «pulsación a pulsación»).
+// Pegar (un solo evento: insert_text o Ctrl+V) llega entero.  ?teclado_ok=1 = no se pierde ninguna letra;
+// ?sin_insertar=1 = rechaza el texto «insertado» sin teclado (insert_text) pero acepta un pegado de verdad (Ctrl+V).
+let ultimaLetra = -1e9, pulsando = false;
+window.letrasPerdidas = 0;
+$('#buscar').addEventListener('keydown', (e) => {
+  pulsando = true; setTimeout(() => { pulsando = false; }, 0);
+  if (e.key.length !== 1 || e.ctrlKey || e.metaKey || e.altKey || params.get('teclado_ok')) return;
+  const t = performance.now();
+  if (t - ultimaLetra < 120) { e.preventDefault(); window.letrasPerdidas++; return; }
+  ultimaLetra = t;
+});
+$('#buscar').addEventListener('beforeinput', (e) => {
+  if (params.get('sin_insertar') && e.inputType === 'insertText' && !pulsando) e.preventDefault();
+});
+// ?como_real=1 (v3.6.1): el buscador como el del Outlook real: combobox sin type=search, «Search» en el placeholder y
+// el placeholder DESAPARECE en cuanto hay texto (el bot lo buscaba por el placeholder y lo perdía al pegar)
+if (params.get('como_real')) {
+  const b = $('#buscar');
+  b.type = 'text'; b.setAttribute('role', 'combobox'); b.setAttribute('aria-autocomplete', 'list');
+  b.setAttribute('aria-label', 'Search for email, meetings, files and more.'); b.placeholder = 'Search';
+  b.addEventListener('input', () => { b.placeholder = b.value ? '' : 'Search'; });
+}
+function cerrarMenus() { document.querySelectorAll('[role=menu]').forEach((m) => m.remove()); }
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') cerrarMenus(); });
+function bajar(url) { const a = el('a', { href: url, download: '' }); document.body.append(a); a.click(); a.remove(); }
+async function abrir(id, fila) {
+  document.querySelectorAll('[data-convid]').forEach((f) => f.setAttribute('aria-selected', 'false'));
+  fila.setAttribute('aria-selected', 'true');
+  const panel = $('#ReadingPaneContainerId');
+  panel.replaceChildren(el('div', null, 'Cargando…'));
+  const m = await api('/api/correo/mensaje?modo=outlook&id=' + encodeURIComponent(id));
+  await new Promise((r) => setTimeout(r, 300));             // Outlook tarda un poco en pintar el correo
+  const adj = el('div', { class: 'adjuntos' });
+  for (const a of m.adjuntos) {
+    const mas = el('button', { 'aria-label': 'Más acciones' }, '⋯');
+    mas.onclick = (ev) => {
+      ev.stopPropagation(); cerrarMenus();
+      // ?sin_menu=1: el menú no tiene «Descargar» (el bot tiene que usar «Descargar todo»)
+      const menu = params.get('sin_menu') ? el('div', { role: 'menu' }, el('div', { role: 'menuitem' }, 'Vista previa')) :
+        el('div', { role: 'menu' },
+          el('div', { role: 'menuitem' }, 'Vista previa'),
+          el('div', { role: 'menuitem', onclick: () => { cerrarMenus(); bajar(a.url); } }, 'Descargar'));
+      document.body.append(menu);
+    };
+    adj.append(el('div', { role: 'option', class: 'tarjeta', 'aria-label': a.nombre + ' Abrir ' + a.tamano }, el('span', null, a.nombre), mas));
+  }
+  if (m.adjuntos.length > 1) {
+    const todo = el('button', { 'data-automationid': 'splitbuttonprimary' }, 'Descargar todo');
+    todo.onclick = () => bajar('/api/correo/todo?id=' + encodeURIComponent(m.id));
+    adj.append(todo);
+  }
+  const cuerpo = el('div', { 'aria-label': 'Cuerpo del mensaje', id: 'UniqueMessageBody_' + m.id });
+  cuerpo.innerHTML = m.html;                                // (página de prueba: el HTML viene del servidor de prueba)
+  if (params.get('como_real')) {
+    // v3.6.1: como el Outlook real: «…_FROM» con solo el NOMBRE, la fecha en el texto de «…_DATETIME» y la dirección en
+    // la ficha de contacto que sale al pasar el ratón por el nombre («Send an email to …»)
+    const quien = el('span', { role: 'button', tabindex: '0', 'aria-label': 'From: ' + m.de_nombre }, m.de_nombre);
+    quien.onmouseenter = () => {
+      document.querySelectorAll('.ficha').forEach((f) => f.remove());
+      setTimeout(() => document.body.append(el('div', { role: 'dialog', class: 'ficha' }, el('div', null, m.de_nombre),
+        el('button', { 'aria-label': 'Send an email to ' + m.de_correo, title: 'Send an email to ' + m.de_correo }, '✉'))), 500);
+    };
+    panel.replaceChildren(
+      el('span', { role: 'heading', 'aria-level': '3', id: 'CONV_' + m.id + '_SUBJECT' }, m.asunto),
+      el('div', null, el('span', { role: 'heading', 'aria-level': '3', id: 'MSG_' + m.id + '_FROM' }, quien), ' ',
+        el('div', { role: 'heading', 'aria-level': '3', id: 'MSG_' + m.id + '_DATETIME' }, m.fecha_outlook)),
+      adj, cuerpo);
+    return;
+  }
+  panel.replaceChildren(
+    el('div', { role: 'heading', 'aria-level': '2' }, m.asunto),
+    el('div', null, el('span', { class: 'remitente', title: m.de_correo }, m.de_nombre), ' ', el('span', { title: m.fecha_outlook }, m.fecha_outlook)),
+    adj, cuerpo);
+}
+cargar('');
+</script>
+</body>
+</html>

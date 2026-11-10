@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Consulta (prueba v3.3) - Un control que falla</title>
+<style>body { font-family: Segoe UI, Arial, sans-serif; margin: 30px; } .fila { margin-bottom: 10px; }</style>
+</head>
+<body>
+<!--
+  v3.3: un campo cuyo «value» lanza un error al leerlo (como algunos componentes que rompen al inspeccionarlos).  Antes
+  de la 3.3 el mapeador entero fallaba; ahora ese control va a la lista de errores y el mapa sale con los demás.
+  «Descargar» baja /api/erp/descarga con la lista y la fecha.
+-->
+  <h1>Consulta</h1>
+  <form onsubmit="return false">
+    <div class="fila"><label for="almacen">Almacén</label>
+      <select id="almacen"><option>Central</option><option>Santiago</option><option>Este</option></select></div>
+    <div class="fila"><label for="roto">Campo raro</label><input type="text" id="roto"></div>
+    <div class="fila"><label for="fecha">Fecha de corte</label><input type="text" id="fecha" value="26/10/2026"></div>
+    <div class="fila"><button type="button" id="descargar">Descargar</button></div>
+  </form>
+  <script>
+    Object.defineProperty(document.getElementById('roto'), 'value', { get: function () { throw new Error('componente roto'); } });
+    document.getElementById('descargar').addEventListener('click', function () {
+      var a = document.createElement('a');
+      a.href = '/api/erp/descarga?almacen=' + encodeURIComponent(document.getElementById('almacen').value) +
+        '&fecha=' + encodeURIComponent(document.getElementById('fecha').value);
+      a.setAttribute('download', ''); document.body.appendChild(a); a.click(); a.remove();
+    });
+  </script>
+</body>
+</html>

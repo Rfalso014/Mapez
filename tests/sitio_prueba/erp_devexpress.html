@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>ERP (prueba v3.8) - Inicio</title>
+<style>
+  body { font-family: Segoe UI, Arial, sans-serif; margin: 0; }
+  .barra { display: flex; align-items: center; gap: 8px; padding: 4px 8px; background: #f3f4f6; border-bottom: 1px solid #ccc; }
+  .dxm-main ul { list-style: none; margin: 0; padding: 0; }
+  .dxm-main > ul > li { display: inline-block; position: relative; }
+  .dxm-content { padding: 6px 10px; cursor: default; white-space: nowrap; }
+  .dxm-submenu { display: none; position: absolute; left: 0; top: 100%; background: #fff; border: 1px solid #999; min-width: 220px; }
+  .dxm-main li:hover > .dxm-submenu { display: block; }
+  .busca { margin-left: auto; display: flex; align-items: center; gap: 4px; }
+  #tab0_Frame { width: 1200px; height: 560px; border: 0; margin-top: 6px; }
+</style>
+</head>
+<body>
+<!--
+  v3.8: copia de la pantalla del ERP real («Registro de asistencia», diagnóstico del 28/10/2026): la barra de
+  arriba (menú DevExpress y el buscador general «BUSCAR…») está en el documento principal y la consulta, DENTRO del
+  iframe #tab0_Frame (erp_devexpress_consulta.html).  El buscador general NO es un filtro del reporte.
+-->
+  <div class="barra">
+    <div class="dxm-main dxm-horizontal" id="ctl00_formContent_mainMenu">
+      <ul>
+        <li class="dxm-item dxm-subMenu" id="ctl00_formContent_mainMenu_DXI10_"><div class="dxm-content"><span class="dx-vam">Recursos Humanos</span></div>
+          <ul class="dxm-submenu">
+            <li class="dxm-item"><div class="dxm-content"><span class="dx-vam">Registro De Asistencia</span></div></li>
+          </ul>
+        </li>
+        <li class="dxm-item dxm-subMenu" id="ctl00_formContent_mainMenu_DXI11_"><div class="dxm-content"><span class="dx-vam">Comisiones</span></div></li>
+      </ul>
+    </div>
+    <div class="busca">
+      <img src="data:image/gif;base64,R0lGODlhAQABAAAAACw=" alt="" class="icono-busqueda" width="16" height="16">
+      <input type="text" id="txtBusquedaPrincipal" placeholder="Buscar..." style="width:200px">
+    </div>
+  </div>
+  <iframe id="tab0_Frame" name="tab0_Frame" src="erp_devexpress_consulta.html"></iframe>
+</body>
+</html>

@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Lista con autocompletar (tipo Vuetify)</title>
+<style>
+  body { font-family: Segoe UI, Arial, sans-serif; margin: 30px; }
+  .v-input { width: 340px; margin-bottom: 16px; }
+  .v-field { position: relative; border: 1px solid #888; border-radius: 4px; padding: 18px 34px 6px 10px; cursor: text; }
+  .v-label { position: absolute; left: 10px; top: 2px; font-size: 12px; color: #555; }
+  .v-field__input input { border: 0; outline: 0; width: 100%; font: inherit; pointer-events: none; }  /* los clics van al contenedor */
+  .v-field__append-inner { position: absolute; right: 8px; top: 14px; cursor: pointer; }
+  .v-overlay { position: absolute; z-index: 20; background: #fff; border: 1px solid #999; box-shadow: 0 4px 10px rgba(0,0,0,.2); }
+  .v-list-item { padding: 6px 12px; cursor: pointer; }
+  .v-list-item:hover { background: #eef2ff; }
+  #resultado { margin-top: 14px; font-weight: 600; }
+</style>
+</head>
+<body>
+  <h1>Reportes (Vue/Vuetify de prueba)</h1>
+  <div class="v-input v-autocomplete" id="campo-reporte">
+    <div class="v-field">
+      <label class="v-label v-field-label">Filtro por reporte</label>
+      <div class="v-field__input">
+        <input id="input-12" role="combobox" aria-expanded="false" aria-autocomplete="list" aria-label="Open" autocomplete="off">
+      </div>
+      <div class="v-field__append-inner"><i class="mdi mdi-menu-down" aria-label="Open">▾</i></div>
+    </div>
+  </div>
+  <button id="generar" type="button">Generar</button>
+  <div id="resultado"></div>
+  <div class="v-overlay-container"></div>
+  <script>
+    // ?modo=alternar: cada clic en el campo abre o cierra la lista (lo que hace que «etiqueta + cuadro»
+    // a velocidad de reproducción la deje cerrada).  Por defecto, el clic en el campo solo abre.
+    var alternar = /modo=alternar/.test(location.search);
+    var opciones = ['Detalles Ventas Mayorista', 'Detalles Ventas Sucursal', 'Resumen de Ventas'];
+    var input = document.getElementById('input-12');
+    var campo = document.querySelector('#campo-reporte .v-field');
+    var contenedor = document.querySelector('.v-overlay-container');
+    var seleccion = '';
+    var menu = null;
+
+    function cerrar() {
+      if (menu) { menu.remove(); menu = null; }
+      input.setAttribute('aria-expanded', 'false');
+    }
+    function abrir(filtro) {
+      cerrar();
+      menu = document.createElement('div');
+      menu.className = 'v-overlay v-menu';
+      var r = campo.getBoundingClientRect();
+      menu.style.left = (r.left + window.scrollX) + 'px';
+      menu.style.top = (r.bottom + window.scrollY) + 'px';
+      menu.style.width = r.width + 'px';
+      var lista = document.createElement('div');
+      lista.className = 'v-list';
+      lista.setAttribute('role', 'listbox');
+      opciones.filter(function (o) { return !filtro || o.toLowerCase().indexOf(filtro.toLowerCase()) >= 0; })
+        .forEach(function (o) {
+          var it = document.createElement('div');
+          it.className = 'v-list-item';
+          it.setAttribute('role', 'option');
+          it.innerHTML = '<div class="v-list-item-title">' + o + '</div>';
+          it.addEventListener('mousedown', function (e) { e.preventDefault(); });   // no quita el foco
+          it.addEventListener('click', function () {
+            seleccion = o;
+            input.value = o;                       // la web pone el texto de la opción en el campo
+            input.dispatchEvent(new Event('input', { bubbles: true }));
+            cerrar();
+          });
+          lista.appendChild(it);
+        });
+      menu.appendChild(lista);
+      setTimeout(function () {                     // se abre con un pequeño retraso (animación)
+        if (menu) { contenedor.appendChild(menu); input.setAttribute('aria-expanded', 'true'); }
+      }, 80);
+    }
+    campo.addEventListener('mousedown', function (e) {
+      if (e.target.closest('.v-field__append-inner')) return;
+      e.preventDefault();
+      input.focus();
+      if (menu && alternar) cerrar(); else if (!menu) abrir('');
+    });
+    document.querySelector('.v-field__append-inner').addEventListener('mousedown', function (e) {
+      e.preventDefault();
+      input.focus();
+      if (menu) cerrar(); else abrir('');
+    });
+    input.addEventListener('input', function (e) {
+      if (e.isTrusted) { seleccion = ''; abrir(input.value); }
+    });
+    document.addEventListener('mousedown', function (e) {
+      if (menu && !e.target.closest('.v-menu') && !e.target.closest('#campo-reporte')) cerrar();
+    });
+    document.getElementById('generar').addEventListener('click', function () {
+      document.getElementById('resultado').textContent = seleccion ? 'Reporte: ' + seleccion : 'Elige un reporte';
+    });
+  </script>
+</body>
+</html>

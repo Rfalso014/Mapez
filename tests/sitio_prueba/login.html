@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Aplicación - Iniciar sesión</title>
+<style>
+  body { font-family: Segoe UI, Arial, sans-serif; margin: 40px; }
+  .error { color: #b91c1c; min-height: 1.2em; }
+  td { padding: 8px; border: 1px solid #ddd; }
+  #clave_I { display: none; }
+</style>
+</head>
+<body>
+  <h1>Aplicación de reportes</h1>
+  <!--
+    Página de inicio de sesión de prueba (v2.3).  Sesión en localStorage («sesion_app»).
+    ?licencia=1   pide además un campo obligatorio «Licencia» (válida: L-77)
+    ?dx=1         campos dentro de celdas (td) como DevExpress, con «ojito» y la contraseña real oculta (#clave_I)
+                  bajo un «clon» visible (#clave_I_CLND), como los campos de contraseña de DevExpress
+    ?volver=X     página a la que se vuelve al entrar (por defecto app.html)
+    Cada envío del formulario suma 1 a localStorage «envios_login» (y guarda los datos enviados en «ultimos_envios»).
+  -->
+  <form id="aspnetForm" onsubmit="return false">
+    <div id="normal">
+      <p><label for="usuario">Usuario</label> <input id="usuario" name="usuario" type="text" autocomplete="off"></p>
+      <p id="fila_licencia" style="display:none"><label for="licencia">Licencia</label>
+         <input id="licencia" name="licencia" type="text" autocomplete="off"></p>
+      <p><label for="clave">Contraseña</label> <input id="clave" name="clave" type="password" autocomplete="off"></p>
+    </div>
+    <table id="tabla_dx" style="display:none">
+      <tr><td>Usuario</td><td id="td_usuario"><input id="usuario_I" name="ctl00$usuario" type="text" autocomplete="off"></td></tr>
+      <tr><td>Contraseña</td><td id="td_clave">
+        <input id="clave_I_CLND" type="text" value="Contraseña" readonly style="color:#999">
+        <input id="clave_I" name="ctl00$clave" type="password" autocomplete="off">
+        <button id="ojo" type="button" aria-label="appended action">ver</button></td></tr>
+    </table>
+    <button id="entrar" type="button">Entrar</button>
+    <div id="error" class="error" role="alert"></div>
+  </form>
+  <script>
+    var q = new URLSearchParams(location.search);
+    var dx = q.get('dx') === '1';
+    var conLicencia = q.get('licencia') === '1';
+    var volver = q.get('volver') || 'app.html';
+    if (localStorage.getItem('sesion_app')) { location.replace(volver); }
+    if (dx) {
+      document.getElementById('normal').style.display = 'none';
+      document.getElementById('tabla_dx').style.display = 'table';
+      var clon = document.getElementById('clave_I_CLND'), real = document.getElementById('clave_I');
+      clon.addEventListener('focus', function () { clon.style.display = 'none'; real.style.display = 'inline'; real.focus(); });
+      document.getElementById('ojo').addEventListener('click', function () {
+        clon.style.display = 'none'; real.style.display = 'inline';
+        real.type = (real.type === 'password') ? 'text' : 'password';
+      });
+    }
+    if (conLicencia) {
+      document.getElementById('fila_licencia').style.display = 'block';
+      document.getElementById('licencia').required = true;
+    }
+    function entrar() {
+      var u = document.getElementById(dx ? 'usuario_I' : 'usuario').value;
+      var c = document.getElementById(dx ? 'clave_I' : 'clave').value;
+      var l = document.getElementById('licencia').value;
+      localStorage.setItem('envios_login', String(parseInt(localStorage.getItem('envios_login') || '0', 10) + 1));
+      var envios = JSON.parse(localStorage.getItem('ultimos_envios') || '[]');
+      envios.push(u + '|' + c.length + '|' + l);
+      localStorage.setItem('ultimos_envios', JSON.stringify(envios));
+      var err = document.getElementById('error');
+      err.textContent = '';
+      setTimeout(function () {          // el servidor tarda un poco en contestar
+        if (u === 'demo' && c === 'clave-de-prueba-123' && (!conLicencia || l === 'L-77')) {
+          localStorage.setItem('sesion_app', 'ok');
+          location.href = volver;
+        } else {
+          err.textContent = 'Usuario o contraseña incorrectos';
+        }
+      }, 300);
+    }
+    document.getElementById('entrar').addEventListener('click', entrar);
+    document.addEventListener('keydown', function (e) { if (e.key === 'Enter') entrar(); });
+  </script>
+</body>
+</html>

@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Informes (prueba v3.3) - Historial Bancario</title>
+<style>
+  body { font-family: Segoe UI, Arial, sans-serif; margin: 0; }
+  .main-header { background: #3c8dbc; color: #fff; padding: 8px 16px; }
+  .main-header .dropdown-menu { display: none; }
+  #siteBody { padding: 20px; }
+  table.form td { padding: 6px; }
+  .input-group { display: inline-flex; align-items: center; }
+  .input-group-addon, .input-group-btn button { border: 1px solid #ccc; padding: 2px 6px; background: #eee; cursor: pointer; }
+  .btn-success { background: #00a65a; color: #fff; border: 0; padding: 6px 14px; }
+  .modal { display: none; position: fixed; top: 60px; left: 30%; width: 40%; background: #fff; border: 2px solid #333; padding: 10px; z-index: 10; }
+  .modal.in { display: block; }
+  #MainContent_gridGeneric td { border: 1px solid #999; padding: 3px 8px; cursor: pointer; }
+  .datepicker { display: none; }
+</style>
+</head>
+<body>
+<!--
+  v3.3: formulario tipo Informes «Reporte Historial Bancario» SIN <label>: las etiquetas son celdas de una tabla
+  (<td>Fecha Inicial</td><td><input></td>), las fechas son campos de texto con bootstrap-datepicker (formato 2026-10-01 y
+  el icono del calendario), «Cuenta No.» es un campo con una lupa que abre una ventanita con una tabla
+  (#MainContent_gridGeneric) donde se pulsa la fila, «Localidad» es una lista nativa y el botón verde «Ver Reporte»
+  (input submit; con ?imagen=1 es un <input type=image alt="Ver Reporte">) abre el informe en OTRA pestaña.
+  En la barra hay un desplegable de Bootstrap del usuario, que no es un filtro.
+-->
+  <header class="main-header">
+    <nav class="navbar"><span>Informes Web</span>
+      <a href="#" class="dropdown-toggle" data-toggle="dropdown">usuario1</a><ul class="dropdown-menu"><li><a href="#">Salir</a></li></ul>
+    </nav>
+  </header>
+  <form id="form1" onsubmit="return false">
+    <div id="siteBody">
+      <h3>Historial Banco</h3>
+      <div id="MainContent_updatePanelReporte">
+        <table class="form">
+          <tr>
+            <td>Fecha Inicial</td>
+            <td><div class="input-group date" id="divDateIni"><input type="text" class="form-control datepicker-input" id="MainContent_dateFIni"
+                 name="ctl00$MainContent$dateFIni" value="2026-10-01"><span class="input-group-addon"><i class="fa fa-calendar"></i></span></div></td>
+            <td>Fecha Final</td>
+            <td><div class="input-group date" id="divDateFin"><input type="text" class="form-control" id="MainContent_dateFFin"
+                 name="ctl00$MainContent$dateFFin" value="2026-10-25"><span class="input-group-addon"><i class="fa fa-calendar"></i></span></div></td>
+          </tr>
+          <tr>
+            <td>Cuenta No.</td>
+            <td><div class="input-group"><input type="text" class="form-control" id="MainContent_txtNumCuenta" name="ctl00$MainContent$txtNumCuenta" readonly>
+                 <span class="input-group-btn"><button type="button" class="btn btn-default" id="MainContent_btnSNumCuenta" name="NumCuenta"><i class="fa fa-search"></i></button></span></div></td>
+            <td>Localidad</td>
+            <td><select id="MainContent_ddlLocalidad" name="ctl00$MainContent$ddlLocalidad"><option value="0">Todos</option>
+                 <option value="1">Zona Capital</option><option value="2">Santiago</option></select></td>
+          </tr>
+        </table>
+        <p id="botones"></p>
+      </div>
+    </div>
+  </form>
+  <div class="modal" id="modalGeneric" role="dialog">
+    <button type="button" class="close" data-dismiss="modal" aria-label="Close">×</button>
+    <div class="modal-body">
+      <table id="MainContent_gridGeneric"><thead><tr><th>Código</th><th>Descripción</th></tr></thead><tbody>
+        <tr class="odd"><td>1110209</td><td>Asociacion Ejemplo</td></tr>
+        <tr class="even"><td>2220301</td><td>Banco Uno Corriente</td></tr>
+        <tr class="odd"><td>3330402</td><td>Banco Dos Ahorros</td></tr>
+      </tbody></table>
+    </div>
+  </div>
+  <script>
+    var q = new URLSearchParams(location.search);
+    var zona = document.getElementById('botones');
+    zona.innerHTML = q.get('imagen') === '1'
+      ? '<input type="image" id="MainContent_ibtnList" name="ctl00$MainContent$ibtnList" alt="Ver Reporte" src="data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==" style="width:110px;height:30px;background:#00a65a">'
+      : '<input type="submit" id="MainContent_ibtnList" name="ctl00$MainContent$ibtnList" value="Ver Reporte" class="btn btn-success">';
+    var modal = document.getElementById('modalGeneric');
+    document.getElementById('MainContent_btnSNumCuenta').addEventListener('click', function () { modal.classList.add('in'); });
+    modal.querySelector('.close').addEventListener('click', function () { modal.classList.remove('in'); });
+    document.addEventListener('keydown', function (e) { if (e.key === 'Escape') modal.classList.remove('in'); });
+    document.querySelectorAll('#MainContent_gridGeneric tbody td').forEach(function (td) {
+      td.addEventListener('click', function () {
+        document.getElementById('MainContent_txtNumCuenta').value = td.parentElement.children[0].textContent;
+        modal.classList.remove('in');
+      });
+    });
+    document.getElementById('MainContent_ibtnList').addEventListener('click', function (e) {
+      e.preventDefault();
+      var loc = document.getElementById('MainContent_ddlLocalidad');
+      var p = 'desde=' + encodeURIComponent(document.getElementById('MainContent_dateFIni').value) +
+        '&hasta=' + encodeURIComponent(document.getElementById('MainContent_dateFFin').value) +
+        '&cuenta=' + encodeURIComponent(document.getElementById('MainContent_txtNumCuenta').value + ' ' + loc.options[loc.selectedIndex].text);
+      window.open('informes_reporte.html?' + p, '_blank');
+    });
+  </script>
+</body>
+</html>

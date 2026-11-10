@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Portal de reportes - Reporte lento</title>
+<style>
+  body { font-family: Segoe UI, Arial, sans-serif; margin: 40px; }
+  #resultado { border: 1px solid #999; padding: 14px; margin-top: 18px; display: none; }
+  #spinner { margin-top: 14px; color: #555; display: none; }
+  button:disabled { opacity: .4; }
+</style>
+</head>
+<body>
+  <h1>Reporte que tarda en generarse</h1>
+  <p>
+    <button id="generar" type="button">Generar</button>
+    <button id="descargar" type="button" disabled>Descargar</button>
+  </p>
+  <div id="spinner">Generando… (tarda unos segundos)</div>
+  <div id="resultado">Resultado listo</div>
+  <script>
+    // La generación tarda 4 s (o los milisegundos de ?ms=...).
+    var ms = parseInt((location.search.match(/ms=(\d+)/) || [0, 4000])[1], 10);
+    document.getElementById('generar').addEventListener('click', function () {
+      document.getElementById('spinner').style.display = 'block';
+      document.getElementById('resultado').style.display = 'none';
+      setTimeout(function () {
+        document.getElementById('spinner').style.display = 'none';
+        document.getElementById('resultado').style.display = 'block';
+        document.getElementById('descargar').disabled = false;
+      }, ms);
+    });
+    document.getElementById('descargar').addEventListener('click', function () {
+      var blob = new Blob(['columna,valor\nlento,42\n'], { type: 'text/csv' });
+      var a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'reporte_lento.csv';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    });
+  </script>
+</body>
+</html>

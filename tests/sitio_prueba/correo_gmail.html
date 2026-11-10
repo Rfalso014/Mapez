@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Correo (prueba) - Gmail</title>
+<!-- v3.4: imita la estructura de Gmail (solo lo que usa el bot): búsqueda por la dirección #search/<operadores>, filas
+     tr.zA (asunto .bog con data-legacy-thread-id, remitente [email], fecha en el title de td.xW span), correo abierto
+     (#search/<consulta>/<id>) con h2.hP, span.gD[email], span.g3[title], div.a3s y adjuntos div.aQH span.aZo (.aV3 +
+     enlace «Descargar»).  Sin sesión enseña el campo #identifierId (como accounts.google.com).
+     ?auto_login=MS = el «usuario» inicia sesión solo pasados MS ms. -->
+<style>
+  body { font-family: sans-serif; margin: 0; }
+  tr.zA { cursor: pointer; }
+  td { padding: 4px 8px; border-bottom: 1px solid #eee; }
+</style>
+</head>
+<body>
+<div id="login" hidden>
+  <h1>Iniciar sesión</h1><p>Usa tu cuenta de Google</p>
+  <input type="email" id="identifierId" aria-label="Correo electrónico o teléfono">
+  <button type="button" id="siguiente">Siguiente</button>
+</div>
+<div id="gb" hidden><input name="q" aria-label="Buscar correo" placeholder="Buscar correo"></div>
+<div role="main" id="main" hidden></div>
+<script>
+const params = new URLSearchParams(location.search);
+const $ = (s) => document.querySelector(s);
+const api = async (r) => (await fetch(r)).json();
+function el(tag, at, ...hijos) {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(at || {})) { if (k === 'onclick') e.onclick = v; else e.setAttribute(k, v); }
+  for (const h of hijos) e.append(h);
+  return e;
+}
+let esperandoLogin = false;
+function mostrarLogin() {
+  $('#gb').hidden = true; $('#main').hidden = true; $('#login').hidden = false;
+  const auto = params.get('auto_login');
+  if (auto && !esperandoLogin) { esperandoLogin = true; setTimeout(async () => { await api('/api/correo/entrar'); esperandoLogin = false; ruta(); }, parseInt(auto, 10) || 1000); }
+}
+$('#siguiente').onclick = async () => { await api('/api/correo/entrar'); ruta(); };
+function partes() {
+  const h = location.hash.replace(/^#/, '');
+  if (!h.startsWith('search/')) return { q: 'in:inbox', crudo: 'in%3Ainbox', id: '' };
+  const p = h.slice(7).split('/');
+  return { q: decodeURIComponent(p[0].replace(/\+/g, ' ')), crudo: p[0], id: p[1] ? decodeURIComponent(p[1]) : '' };
+}
+async function ruta() {
+  const { q, crudo, id } = partes();
+  const d = await api('/api/correo/lista?modo=gmail&q=' + encodeURIComponent(q));
+  if (d.login) { mostrarLogin(); return; }
+  $('#login').hidden = true; $('#gb').hidden = false; $('#main').hidden = false;
+  if (id) { abrir(id); return; }
+  const cuerpo = el('tbody');
+  if (!d.mensajes.length) cuerpo.append(el('tr', null, el('td', { class: 'TC' }, 'No hay mensajes que coincidan con tu búsqueda.')));
+  for (const m of d.mensajes) {
+    const asunto = el('span', { class: 'bog' }, el('span', { 'data-thread-id': '#thread-f:' + m.id, 'data-legacy-thread-id': m.id }, m.asunto));
+    asunto.onclick = () => { location.hash = '#search/' + crudo + '/' + encodeURIComponent(m.id); };
+    const tr = el('tr', { class: 'zA zE' },
+      el('td', { class: 'yX' }, el('span', { class: 'zF', email: m.de_correo, name: m.de_nombre }, m.de_nombre)),
+      el('td', { class: 'xY' }, asunto, el('span', { class: 'y2' }, ' - ' + m.vista)),
+      el('td', { class: 'xW' }, el('span', { title: m.fecha_gmail }, m.corta)));
+    if (m.adjuntos.length) tr.append(el('td', null, el('span', { class: 'brd' }, m.adjuntos[0])));
+    cuerpo.append(tr);
+  }
+  await new Promise((r) => setTimeout(r, 200));
+  $('#main').replaceChildren(el('table', null, cuerpo));
+}
+async function abrir(id) {
+  const m = await api('/api/correo/mensaje?modo=gmail&id=' + encodeURIComponent(id));
+  $('#main').replaceChildren(el('div', null, 'Cargando…'));
+  await new Promise((r) => setTimeout(r, 300));
+  const cuerpo = el('div', { class: 'a3s aiL' });
+  cuerpo.innerHTML = m.html;                     // (página de prueba: el HTML viene del servidor de prueba)
+  const adj = el('div', { class: 'aQH' });
+  for (const a of m.adjuntos) {
+    adj.append(el('span', { class: 'aZo', download_url: 'application/octet-stream:' + a.nombre + ':' + location.origin + a.url },
+      el('span', { class: 'aV3' }, a.nombre),
+      el('a', { class: 'aQy', href: a.url, download: '', 'aria-label': 'Descargar el archivo adjunto ' + a.nombre }, '⤓')));
+  }
+  $('#main').replaceChildren(el('div', { class: 'adn' },
+    el('h2', { class: 'hP' }, m.asunto),
+    el('div', null, el('span', { class: 'gD', email: m.de_correo, name: m.de_nombre }, m.de_nombre), ' ',
+      el('span', { class: 'g3', title: m.fecha_gmail }, m.corta)),
+    cuerpo, adj));
+}
+window.addEventListener('hashchange', ruta);
+ruta();
+</script>
+</body>
+</html>

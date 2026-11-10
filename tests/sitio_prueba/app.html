@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Aplicación - Inicio</title>
+<style>body { font-family: Segoe UI, Arial, sans-serif; margin: 40px; }</style>
+</head>
+<body>
+  <h1>Inicio de la aplicación</h1>
+  <!--
+    Página protegida de prueba (v2.3): sin sesión (localStorage «sesion_app») va a login.html.
+    #accion suma 1 a localStorage «acciones» y muestra «Acción N hecha».
+    ?expira=N   después de la acción N la sesión caduca sola y la página vuelve al inicio de sesión
+    ?login=X    página de inicio de sesión (por defecto login.html), p. ej. login.html?licencia=1
+  -->
+  <p><button id="accion" type="button">Hacer acción</button></p>
+  <p id="estado"></p>
+  <script>
+    var q = new URLSearchParams(location.search);
+    var login = q.get('login') || 'login.html';
+    var irALogin = function () {
+      var sep = login.indexOf('?') >= 0 ? '&' : '?';
+      location.replace(login + sep + 'volver=' + encodeURIComponent(location.pathname.split('/').pop() + location.search));
+    };
+    if (!localStorage.getItem('sesion_app')) { irALogin(); }
+    var expira = parseInt(q.get('expira') || '0', 10);
+    var n = parseInt(localStorage.getItem('acciones') || '0', 10);
+    if (n) document.getElementById('estado').textContent = 'Acción ' + n + ' hecha';
+    document.getElementById('accion').addEventListener('click', function () {
+      n = parseInt(localStorage.getItem('acciones') || '0', 10) + 1;
+      localStorage.setItem('acciones', String(n));
+      document.getElementById('estado').textContent = 'Acción ' + n + ' hecha';
+      if (expira && n === expira) {
+        setTimeout(function () { localStorage.removeItem('sesion_app'); irALogin(); }, 300);
+      }
+    });
+  </script>
+</body>
+</html>

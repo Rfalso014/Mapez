@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Informes (prueba v3.3) - Inicio</title>
+<style>
+  body { font-family: Segoe UI, Arial, sans-serif; margin: 0; }
+  .main-header { background: #3c8dbc; color: #fff; padding: 8px 16px; }
+  .main-header .dropdown-menu { display: none; position: absolute; background: #fff; color: #111; border: 1px solid #999; list-style: none; padding: 4px; }
+  .main-header .open .dropdown-menu { display: block; }
+  .main-sidebar { position: fixed; top: 40px; left: 0; width: 220px; bottom: 0; background: #222d32; color: #fff; padding: 8px; }
+  .main-sidebar a { color: #b8c7ce; text-decoration: none; display: block; padding: 4px; }
+  .treeview-menu { display: none; list-style: none; padding-left: 12px; }
+  .treeview.menu-open > .treeview-menu { display: block; }
+  .content-wrapper { margin-left: 240px; padding: 60px 20px; }
+</style>
+</head>
+<body>
+<!--
+  v3.3: inicio de un sitio tipo Informes (ASP.NET WebForms + AdminLTE): barra con el menú del usuario (desplegable de
+  Bootstrap, que NO es un filtro), buscador del menú lateral y el árbol Reportes → Bancos → «Reporte Historial Bancario»,
+  que abre el formulario EN LA MISMA PESTAÑA.  Con ?auto=1 la propia página «navega como el usuario» (abre el menú y
+  pulsa el reporte) a los 400 ms, para probar que se mapea la página a la que se llegó y no la de inicio.
+-->
+  <header class="main-header">
+    <nav class="navbar">
+      <span>Informes Web</span>
+      <ul class="nav navbar-nav" style="display:inline-block;list-style:none">
+        <li class="dropdown user-menu"><a href="#" class="dropdown-toggle" data-toggle="dropdown" id="usuario">usuario1</a>
+          <ul class="dropdown-menu"><li><a href="#">Perfil</a></li><li><a href="#">Cerrar sesión</a></li></ul></li>
+      </ul>
+    </nav>
+  </header>
+  <aside class="main-sidebar">
+    <form class="sidebar-form" onsubmit="return false">
+      <div class="input-group"><input type="text" name="q" class="form-control" placeholder="Buscar..."><span class="input-group-btn">
+        <button type="button" class="btn btn-flat" id="search-btn"><i class="fa fa-search"></i></button></span></div>
+    </form>
+    <ul class="sidebar-menu">
+      <li class="treeview" id="Reportes"><a href="#" id="menuReportes">Reportes</a>
+        <ul class="treeview-menu">
+          <li class="treeview" id="Reportes_Bancos"><a href="#" id="menuBancos">Bancos</a>
+            <ul class="treeview-menu"><li><a href="informes2_historial.html" id="menuHistorial">Reporte Historial Bancario</a></li></ul>
+          </li>
+        </ul>
+      </li>
+    </ul>
+  </aside>
+  <div class="content-wrapper"><h1>Bienvenido</h1><p>Elija un reporte en el menú de la izquierda.</p></div>
+  <script>
+    document.querySelectorAll('.treeview > a').forEach(function (a) {
+      a.addEventListener('click', function (e) { e.preventDefault(); a.parentElement.classList.toggle('menu-open'); });
+    });
+    document.getElementById('usuario').addEventListener('click', function (e) { e.preventDefault(); this.parentElement.classList.toggle('open'); });
+    if (new URLSearchParams(location.search).get('auto') === '1') {
+      setTimeout(function () {
+        document.getElementById('menuReportes').click();
+        document.getElementById('menuBancos').click();
+        document.getElementById('menuHistorial').click();
+      }, 400);
+    }
+  </script>
+</body>
+</html>

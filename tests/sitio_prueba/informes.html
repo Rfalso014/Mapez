@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Informes (prueba) - Historial Bancario</title>
+<style>
+  body { font-family: Segoe UI, Arial, sans-serif; margin: 30px; }
+  .fila { margin-bottom: 12px; }
+  label { display: inline-block; width: 120px; }
+</style>
+</head>
+<body>
+<!--
+  Página tipo Informes «Historial Bancario» (v3.2): fechas Desde/Hasta (texto dd/mm/aaaa), lista nativa «Cuenta» y
+  «Ver Reporte», que abre el informe en OTRA pestaña (informes_reporte.html) con una tabla.
+-->
+  <h1>Historial Bancario</h1>
+  <form onsubmit="return false">
+    <div class="fila"><label for="desde">Fecha desde</label><input type="text" id="desde" name="desde" placeholder="dd/mm/aaaa" value="01/10/2026"></div>
+    <div class="fila"><label for="hasta">Fecha hasta</label><input type="text" id="hasta" name="hasta" placeholder="dd/mm/aaaa" value="25/10/2026"></div>
+    <div class="fila"><label for="cuenta">Cuenta</label>
+      <select id="cuenta" name="cuenta"><option>Banco Uno 001</option><option selected>Banco Dos 002</option><option>Banco Tres 003</option></select></div>
+    <div class="fila"><button type="button" id="ver">Ver Reporte</button></div>
+  </form>
+  <script>
+    document.getElementById('ver').addEventListener('click', function () {
+      var q = 'desde=' + encodeURIComponent(document.getElementById('desde').value) + '&hasta=' +
+        encodeURIComponent(document.getElementById('hasta').value) + '&cuenta=' + encodeURIComponent(document.getElementById('cuenta').value);
+      window.open('informes_reporte.html?' + q, '_blank');
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,16 @@
+# Datos del usuario (no se suben al repositorio)
+datos/
+perfiles/
+registros/
+descargas/
+flujos/*
+!flujos/.gitkeep
+version_escritorio/grabaciones/*.json
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Paquete para compartir (se crea con instalador/crear_paquete.py)
+paquete/

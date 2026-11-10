@@ -1,0 +1,66 @@
+/* =====================================================================================================
+   TEMA DE LA INTERFAZ (v3.8, diseño «La Ruta»)
+   -----------------------------------------------------------------------------------------------------
+   Claro y directo: suelo verde muy suave, tinta casi negra, tarjetas blancas y el rojo SOLO para la acción principal.
+   Todo el diseño (app.css) usa solo estas variables.  Sus textos cumplen contraste 4.5:1 sobre el suelo y sobre blanco.
+
+   ⚠  COLOR DE MARCA PROVISIONAL: el rojo aún no es el código oficial de la marca.
+
+   Fuentes: Bricolage Grotesque (títulos) y Figtree (texto) SI están instaladas; si no, Windows usa Bahnschrift y Segoe UI.
+   Todavía no se incluyen en ui/fuentes/.  IBM Plex Mono (datos, horas, archivos) sí va incluida: licencia OFL.  Sin CDN.
+   ===================================================================================================== */
+@font-face { font-family: "IBM Plex Mono"; font-style: normal; font-weight: 400; font-display: swap;
+  src: url("fuentes/ibm-plex-mono-400.woff2") format("woff2"); }
+@font-face { font-family: "IBM Plex Mono"; font-style: normal; font-weight: 500; font-display: swap;
+  src: url("fuentes/ibm-plex-mono-500.woff2") format("woff2"); }
+
+:root {
+  color-scheme: light;
+
+  /* La Ruta */
+  --suelo: #e8efe9;
+  --tinta: #10241c;
+  --papel: #ffffff;
+  --amarillo: #ffd24d;               /* la guía: globo, foco y flechas */
+
+  /* Marca */
+  --marca: #c9243a;                  /* PROVISIONAL: acción principal, logotipo y avisos nuevos */
+  --marca-2: #a81b2f;                /* PROVISIONAL: al pasar el ratón */
+  --marca-suave: rgba(201, 36, 58, .10);
+  --sobre-marca: #ffffff;
+
+  /* Superficies */
+  --fondo: var(--suelo);
+  --panel: var(--papel);
+  --panel-2: #f3f7f4;
+  --hover: #eef4ef;
+  --campo: #ffffff;                  /* fondo de los campos de texto */
+  --linea: #c5d3c9;
+  --linea-2: #7f9488;                /* bordes de campos y botones pequeños (3:1 sobre blanco) */
+  --texto: var(--tinta);
+  --suave: #44574d;
+  --tenue: #55695e;
+  --velo: rgba(16, 36, 28, .55);
+
+  /* Señales */
+  --vivo: #0a6b7a;                   /* en curso, foco, elegido */
+  --vivo-suave: rgba(10, 107, 122, .11);
+  --ok: #0b6e47;
+  --ok-suave: rgba(11, 110, 71, .11);
+  --aviso: #7a5000;
+  --aviso-suave: #fbeec9;
+  --error: #b3162c;
+  --error-suave: rgba(179, 22, 44, .09);
+  --info: #1f5fa8;
+  --info-suave: rgba(31, 95, 168, .10);
+
+  /* Letra */
+  --f-titulo: "Bricolage Grotesque", "Bahnschrift", "Segoe UI", sans-serif;
+  --f-texto: "Figtree", "Segoe UI", system-ui, sans-serif;
+  --f-mono: "IBM Plex Mono", ui-monospace, Consolas, monospace;
+
+  /* Forma */
+  --radio: 14px;
+  --radio-chico: 10px;
+  --sombra: 0 24px 60px rgba(16, 36, 28, .22);
+}

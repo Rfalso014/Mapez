@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Menú que se abre al pasar el ratón (CSS)</title>
+<style>
+  body { font-family: Segoe UI, Arial, sans-serif; margin: 30px; }
+  ul.menu, ul.menu ul { list-style: none; margin: 0; padding: 0; }
+  ul.menu > li { display: inline-block; position: relative; margin-right: 6px; }
+  ul.menu a { display: block; padding: 6px 12px; background: #e5e7eb; color: #111; text-decoration: none; white-space: nowrap; }
+  ul.menu li:hover > a { background: #c7d2fe; }
+  /* Los submenús solo se ven mientras el ratón está encima de su opción (y son descendientes de ella). */
+  ul.menu ul.sub { display: none; position: absolute; left: 0; top: 100%; background: #fff; border: 1px solid #999; min-width: 200px; z-index: 5; }
+  ul.menu ul.sub li { position: relative; }
+  ul.menu ul.sub ul.sub { left: 100%; top: 0; }
+  ul.menu li:hover > ul.sub { display: block; }
+  #resultado { margin-top: 160px; font-weight: 600; }
+</style>
+</head>
+<body>
+  <h1>ERP de prueba</h1>
+  <ul class="menu" id="menu">
+    <li class="menu-item"><a href="#" id="m-archivo">Archivo</a>
+      <ul class="sub">
+        <li><a href="#" data-op="Abrir">Abrir</a></li>
+        <li><a href="#" data-op="Salir">Salir</a></li>
+      </ul>
+    </li>
+    <li class="menu-item"><a href="#">Inventario</a>
+      <ul class="sub">
+        <li class="menu-item"><a href="#">Movimientos</a>
+          <ul class="sub">
+            <li><a href="#" data-op="Registro De Asistencia">Registro De Asistencia</a></li>
+            <li><a href="#" data-op="Traslados">Traslados</a></li>
+          </ul>
+        </li>
+        <li><a href="#" data-op="Existencias">Existencias</a></li>
+      </ul>
+    </li>
+  </ul>
+  <div id="resultado"></div>
+  <script>
+    document.getElementById('menu').addEventListener('click', function (e) {
+      var a = e.target.closest('a');
+      if (!a) return;
+      e.preventDefault();
+      if (a.dataset.op) document.getElementById('resultado').textContent = 'Elegido: ' + a.dataset.op;
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>ERP (prueba v3.3) - Consulta</title>
+<style>
+  body { font-family: Segoe UI, Arial, sans-serif; margin: 10px; }
+  table.dxeButtonEditSys { border: 1px solid #999; border-collapse: collapse; }
+  table.dxeButtonEditSys td { padding: 0; }
+  .dxeButtonEditButton { width: 18px; text-align: center; background: #ddd; cursor: pointer; }
+  .dxpcDropDown { position: absolute; background: #fff; border: 1px solid #666; z-index: 5; }
+  .dxeListBoxItem { padding: 3px 8px; cursor: pointer; }
+  .dxeListBoxItem:hover { background: #def; }
+  .dxm-main ul { list-style: none; margin: 0; padding: 0; }
+  .dxm-main > ul > li { display: inline-block; position: relative; }
+  .dxm-content { padding: 6px 12px; background: #e5e7eb; cursor: default; white-space: nowrap; }
+  .dxm-submenu { display: none; position: absolute; left: 0; top: 100%; background: #fff; border: 1px solid #999; min-width: 160px; }
+  .dxm-main li:hover > .dxm-submenu { display: block; }
+  td.dxflCaptionCell { padding-right: 10px; }
+</style>
+</head>
+<body>
+<!--
+  v3.3: consulta tipo DevExpress (dentro del iframe de erp2_inicio.html): FormLayout con leyendas .dxflCaption (sin
+  for=), un ASPxComboBox «Almacén» (campo …_I de solo lectura, botón …_B-1 y la lista …_DDD_L con filas
+  .dxeListBoxItem, oculta hasta que se abre), un ASPxDateEdit «Fecha de corte» (…_I + calendario …_DDD_C) y un menú
+  DevExpress con «Consultar» y «Vista Exportar» → «Exportar» (con el ratón encima), que descarga /api/erp/descarga.
+-->
+  <div class="dxm-main dxm-horizontal" id="mainFormPage_menu">
+    <ul>
+      <li class="dxm-item" id="mainFormPage_menu_DXI0_"><div class="dxm-content"><span class="dx-vam">Consultar</span></div></li>
+      <li class="dxm-item" id="mainFormPage_menu_DXI1_"><div class="dxm-content"><span class="dx-vam">Vista Exportar</span></div>
+        <ul class="dxm-submenu"><li class="dxm-item" id="mainFormPage_menu_DXI1i0_"><div class="dxm-content"><span class="dx-vam">Exportar</span></div></li></ul>
+      </li>
+    </ul>
+  </div>
+  <table class="dxflFormLayout" style="margin-top:20px">
+    <tr>
+      <td class="dxflCaptionCell"><label class="dxflCaption">Almacén:</label></td>
+      <td class="dxflNestedControlCell">
+        <table class="dxeButtonEditSys dxeButtonEdit" id="ctl00_formContent_cbAlmacen"><tr>
+          <td><input type="text" id="ctl00_formContent_cbAlmacen_I" name="ctl00$formContent$cbAlmacen" value="Central" readonly style="border:0;width:160px"></td>
+          <td class="dxeButtonEditButton" id="ctl00_formContent_cbAlmacen_B-1">▼</td>
+        </tr></table>
+        <div class="dxpcDropDown" id="ctl00_formContent_cbAlmacen_DDD_PW-1" style="display:none">
+          <table class="dxeListBox" id="ctl00_formContent_cbAlmacen_DDD_L"><tbody>
+            <tr><td class="dxeListBoxItem">Central</td></tr><tr><td class="dxeListBoxItem">Santiago</td></tr><tr><td class="dxeListBoxItem">Este</td></tr>
+          </tbody></table>
+        </div>
+      </td>
+    </tr>
+    <tr>
+      <td class="dxflCaptionCell"><label class="dxflCaption">Fecha de corte:</label></td>
+      <td class="dxflNestedControlCell">
+        <table class="dxeButtonEditSys dxeButtonEdit" id="ctl00_formContent_deFecha"><tr>
+          <td><input type="text" id="ctl00_formContent_deFecha_I" name="ctl00$formContent$deFecha" value="26/10/2026" style="border:0;width:160px"></td>
+          <td class="dxeButtonEditButton" id="ctl00_formContent_deFecha_B-1">▦</td>
+        </tr></table>
+        <div id="ctl00_formContent_deFecha_DDD_C" style="display:none">(calendario)</div>
+      </td>
+    </tr>
+  </table>
+  <div id="resultado" style="margin-top:20px"></div>
+  <script>
+    var combo = document.getElementById('ctl00_formContent_cbAlmacen');
+    var input = document.getElementById('ctl00_formContent_cbAlmacen_I');
+    var pop = document.getElementById('ctl00_formContent_cbAlmacen_DDD_PW-1');
+    function abrir() { var r = combo.getBoundingClientRect(); pop.style.left = r.left + 'px'; pop.style.top = (r.bottom + scrollY) + 'px'; pop.style.display = 'block'; }
+    input.addEventListener('mousedown', function () { pop.style.display === 'block' ? pop.style.display = 'none' : abrir(); });
+    document.getElementById('ctl00_formContent_cbAlmacen_B-1').addEventListener('mousedown', function () { pop.style.display === 'block' ? pop.style.display = 'none' : abrir(); });
+    document.addEventListener('keydown', function (e) { if (e.key === 'Escape') pop.style.display = 'none'; });
+    pop.querySelectorAll('.dxeListBoxItem').forEach(function (td) {
+      td.addEventListener('click', function () { input.value = td.textContent; pop.style.display = 'none'; });
+    });
+    var consultado = '';
+    document.getElementById('mainFormPage_menu_DXI0_').addEventListener('click', function () {
+      consultado = input.value + '|' + document.getElementById('ctl00_formContent_deFecha_I').value;
+      document.getElementById('resultado').textContent = 'Consulta: ' + consultado;
+    });
+    document.getElementById('mainFormPage_menu_DXI1i0_').addEventListener('click', function () {
+      if (!consultado) return;
+      var p = consultado.split('|');
+      var a = document.createElement('a');
+      a.href = '/api/erp/descarga?almacen=' + encodeURIComponent(p[0]) + '&fecha=' + encodeURIComponent(p[1]);
+      a.setAttribute('download', ''); document.body.appendChild(a); a.click(); a.remove();
+    });
+  </script>
+</body>
+</html>

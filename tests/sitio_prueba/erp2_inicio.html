@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>ERP (prueba v3.3) - Inicio</title>
+<style>
+  body { font-family: Segoe UI, Arial, sans-serif; margin: 0; }
+  .dxm-main ul { list-style: none; margin: 0; padding: 0; }
+  .dxm-main > ul > li { display: inline-block; position: relative; }
+  .dxm-content { padding: 6px 12px; background: #e5e7eb; cursor: default; white-space: nowrap; }
+  .dxm-submenu { display: none; position: absolute; left: 0; top: 100%; background: #fff; border: 1px solid #999; min-width: 220px; }
+  .dxm-main li:hover > .dxm-submenu { display: block; }
+  #tab0_Frame { width: 900px; height: 420px; border: 1px solid #999; margin-top: 30px; }
+</style>
+</head>
+<body>
+<!--
+  v3.3: ERP tipo DevExpress: el menú de arriba (con el ratón encima) está en el documento principal y la página de la
+  consulta se abre DENTRO de un iframe (#tab0_Frame, como el ERP real).  Con ?auto=1 la propia página «navega como el
+  usuario» a los 300 ms: carga la consulta en el iframe.
+-->
+  <div class="dxm-main dxm-horizontal" id="ctl00_formContent_mainMenu">
+    <ul>
+      <li class="dxm-item" id="ctl00_formContent_mainMenu_DXI10_"><div class="dxm-content"><span class="dx-vam">Recursos Humanos</span></div>
+        <ul class="dxm-submenu">
+          <li class="dxm-item"><div class="dxm-content" id="abrirConsulta"><span class="dx-vam">Administrar Existencias</span></div></li>
+        </ul>
+      </li>
+    </ul>
+  </div>
+  <iframe id="tab0_Frame" name="tab0_Frame" src="about:blank"></iframe>
+  <script>
+    function abrir() { document.getElementById('tab0_Frame').src = 'erp2_consulta.html'; }
+    document.getElementById('abrirConsulta').addEventListener('click', abrir);
+    if (new URLSearchParams(location.search).get('auto') === '1') setTimeout(abrir, 300);
+  </script>
+</body>
+</html>

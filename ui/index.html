@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<title>Bot Web</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="tema.css">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<div class="app">
+  <header class="barra-sup">
+    <a class="logo" href="#/inicio" aria-label="Bot Web: ir a Inicio">B</a>
+    <nav class="riel" aria-label="Secciones">
+      <div id="menu">
+        <div class="riel-grupo">
+          <a href="#/inicio" data-ruta="inicio" data-ico="inicio" aria-label="Inicio"><span class="txt">Inicio</span></a>
+          <a href="#/reportes" data-ruta="reportes" data-ico="reportes" aria-label="Reportes"><span class="txt">Reportes</span></a>
+          <a href="#/vigilancia" data-ruta="vigilancia" data-ico="vigilancia" aria-label="Vigilancia"><span class="txt">Vigilancia</span></a>
+          <a href="#/correo" data-ruta="correo" data-ico="correo" aria-label="Correo"><span class="txt">Correo</span></a>
+          <a href="#/historial" data-ruta="historial" data-ico="historial" aria-label="Historial"><span class="txt">Historial</span></a>
+          <a href="#/ajustes" data-ruta="ajustes" data-ico="ajustes" aria-label="Ajustes"><span class="txt">Ajustes</span></a>
+          <button type="button" id="riel-mas" class="riel-boton" aria-label="Más secciones" aria-expanded="false" aria-controls="riel-sec" data-ico="menu"></button>
+        </div>
+        <div class="riel-grupo sec" id="riel-sec">
+          <a href="#/mapear" data-ruta="mapear" data-ico="mapear" aria-label="Mapear página"><span class="txt">Mapear</span></a>
+          <a href="#/grabar" data-ruta="grabar" data-ico="grabar" aria-label="Grabar un reporte"><span class="txt">Grabar</span></a>
+          <a href="#/accesos" data-ruta="accesos" data-ico="accesos" aria-label="Accesos"><span class="txt">Accesos</span></a>
+        </div>
+      </div>
+    </nav>
+    <div class="riel-herr">
+      <button type="button" id="btn-paleta" class="cmd" aria-label="Buscar o ejecutar (Ctrl K)" aria-keyshortcuts="Control+K"><span>Buscar o ejecutar…</span><kbd>Ctrl K</kbd></button>
+      <button type="button" id="campana" class="icono" aria-label="Notificaciones" title="Notificaciones"><span id="contador" class="contador oculto"></span></button>
+      <div class="riel-pie" id="version">Bot Web</div>
+    </div>
+  </header>
+  <main class="principal">
+    <header class="cabecera">
+      <div class="titulos"><h1 id="titulo">Inicio</h1><p id="subtitulo"></p></div>
+    </header>
+    <div id="trabajo" class="trabajo oculto" role="status" aria-live="polite">
+      <div class="crece"><strong id="trabajo-titulo"></strong><div class="texto" id="trabajo-texto"></div>
+        <div class="progreso via"><div id="trabajo-barra"></div></div></div>
+      <button type="button" class="boton chico" id="trabajo-detener">Detener</button>
+    </div>
+    <section id="contenido" tabindex="-1" aria-live="off"></section>
+  </main>
+</div>
+<div id="paleta" class="paleta-fondo oculto"></div>
+<div id="modal-fondo" class="modal-fondo oculto"></div>
+<div id="toasts" aria-live="polite"></div>
+<script src="app.js"></script>
+</body>
+</html>
