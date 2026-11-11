@@ -18,7 +18,7 @@ Opción A: pasa una copia de la carpeta del bot (por ejemplo en un .zip o en un 
    Lo más fácil: copia la carpeta del bot, borra esas cuatro carpetas DE LA COPIA y comprime la copia.
 
 Opción B: pasa solo el archivo «Instalar Bot Web.cmd».
-   El instalador descarga el bot de GitHub (la rama main del proyecto). Para que funcione,
+   El instalador descarga el bot de GitHub (la rama New-tool del proyecto). Para que funcione,
    ese repositorio tiene que ser PÚBLICO y tener la última versión subida.
 
 
@@ -45,7 +45,11 @@ Si algo falla, el detalle está en  C:\Users\<usuario>\BotWeb\instalacion.log
 
 Actualizar
 ----------
-Volver a abrir «Instalar Bot Web.cmd» (de una carpeta más nueva, o el mismo si descarga de GitHub).
+Cuando hay una versión nueva en GitHub, el bot lo avisa arriba: «Hay una nueva actualización».
+Botón «Actualizar»: se descarga la versión nueva, el bot se cierra, se instala (tus datos se conservan
+y antes se hace una copia de seguridad de la base de datos) y se vuelve a abrir solo.
+También en Ajustes > «Buscar actualizaciones».
+O bien: volver a abrir «Instalar Bot Web.cmd» (de una carpeta más nueva, o el mismo si descarga de GitHub).
 Cambia el programa pero CONSERVA los reportes, contraseñas, descargas y registros.
 
 

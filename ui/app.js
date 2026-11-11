@@ -1094,6 +1094,7 @@
         break;
       case 'acceso_probado': toast(ev.texto, ev.ok ? 'ok' : 'error', 9000); break;
       case 'correo': refrescarCampana(); break;          // v3.4: resultado de revisar una búsqueda de correo
+      case 'actualizacion': pintarActualizacion(ev.info); break;   // v3.9: hay otra versión en GitHub
       case 'externo': {                                  // v3.7: lo que ejecutan las tareas de Windows (con su progreso)
         const antes = new Map((E.externos || []).map((x) => [x.id, x]));
         E.externos = ev.lista || [];
@@ -1119,6 +1120,60 @@
         E.ultimo = Math.max(E.ultimo, r.ultimo);
       } catch (e) { if (E.sinPermiso) return; await dormir(2500); }
     }
+  }
+
+  // ------------------------------------------------------------------ v3.9: «Hay una nueva actualización»
+  // El servidor mira GitHub al abrir y cada 6 horas (y con «Buscar actualizaciones» en Ajustes).  «Más tarde» lo esconde
+  // hasta que se vuelva a abrir el bot.  «Actualizar» descarga la versión nueva y abre su instalador; el bot se cierra.
+  function pintarActualizacion(info) {
+    if (info !== undefined) E.actualizacion = info;
+    const a = E.actualizacion;
+    const caja = $('#actualizacion');
+    if (!a || !a.disponible || a.pospuesta) { caja.classList.add('oculto'); caja.replaceChildren(); return; }
+    const nov = [a.novedades, a.fecha].filter(Boolean).join(' · ');
+    caja.replaceChildren(ico('descargar'),
+      h('div', { class: 'crece' }, h('strong', null, 'Hay una nueva actualización'),
+        nov ? h('div', { class: 'novedades' }, 'Novedades: ' + nov) : null),
+      h('div', { class: 'botones' },
+        boton('Actualizar', () => actualizarAhora(), 'primario chico', { 'data-actualizar': '1' }),
+        boton('Más tarde', () => masTarde(), 'chico', { 'data-mas-tarde': '1' })));
+    caja.classList.remove('oculto');
+  }
+  async function masTarde() {
+    if (E.actualizacion) E.actualizacion.pospuesta = true;
+    pintarActualizacion();
+    try { await api('POST', 'actualizacion/mas-tarde', {}); } catch (e) { /* nada */ }
+  }
+  async function actualizarAhora() {
+    const a = E.actualizacion || {};
+    const sigue = a.copia_git || await confirmar('Actualizar Bot Web',
+      'Se descarga la versión nueva y Bot Web se cierra unos minutos mientras se instala. Después se abre solo.\n\n' +
+      'Tus reportes, contraseñas y descargas se conservan (antes se hace una copia de seguridad de tus datos).', 'Actualizar ahora');
+    if (!sigue) return;
+    const b = $('#actualizacion [data-actualizar]');
+    if (b) { b.disabled = true; b.textContent = 'Descargando…'; }
+    try {
+      await api('POST', 'actualizacion/instalar', {});
+      abrirModal({ titulo: 'Actualizando Bot Web…', escape: false, botones: [],
+        contenido: h('div', null, h('p', null, 'Se abrió la ventana del instalador. Bot Web se cierra ahora y se abrirá solo cuando termine (unos minutos).'),
+          h('p', { class: 'ayuda' }, 'Puedes cerrar esta ventana.')) });
+      setTimeout(() => { try { window.close(); } catch (e) { /* nada */ } }, 4000);
+    } catch (e) {
+      abrirModal({ titulo: 'No se puede actualizar ahora', contenido: h('p', null, e && e.message ? e.message : String(e)),
+        botones: [{ texto: 'Entendido', clase: 'primario', accion: cerrarModal }] });
+    } finally {
+      if (b && b.isConnected) { b.disabled = false; b.textContent = 'Actualizar'; }
+    }
+  }
+  async function buscarActualizaciones(btn) {
+    if (btn) btn.disabled = true;
+    try {
+      const r = await api('POST', 'actualizacion/comprobar', {});
+      pintarActualizacion(r);
+      if (r.disponible) toast('Hay una nueva actualización' + (r.novedades ? ': ' + r.novedades : '') + '.', 'aviso', 9000);
+      else if (r.sin_conexion) toast('No se pudo comprobar: no hay conexión con GitHub. Inténtalo más tarde.', 'aviso', 8000);
+      else toast('Ya tienes la última versión.', 'ok');
+    } catch (e) { errorToast(e); } finally { if (btn) btn.disabled = false; }
   }
 
   // ================================================================== v3.5: vistas vivas y listas por clave
@@ -4845,8 +4900,10 @@
       h('div', { class: 'fila' }, boton('Guardar ajustes', guardar, 'primario'))));
     c.appendChild(panel('Guía de inicio', h('p', { class: 'ayuda' }, 'Te enseña con flechas dónde está cada cosa. Se puede saltar en cualquier momento.'),
       h('div', { class: 'fila' }, boton('Ver la guía otra vez', () => verGuia(), '', { 'data-ver-guia': '1' }))));
-    c.appendChild(panel('Acerca de', h('p', { class: 'ayuda' }, 'Bot Web ' + ((E.estado && E.estado.version) || '') + ' · base de datos: ' + d.base_de_datos),
-      h('p', { class: 'ayuda' }, 'La ventana clásica sigue disponible con: python bot.py --clasica')));
+    const inst = (E.actualizacion && E.actualizacion.instalado) || '';
+    c.appendChild(panel('Acerca de', h('p', { class: 'ayuda' }, 'Bot Web ' + ((E.estado && E.estado.version) || '') + (inst ? ' (' + inst + ')' : '') + ' · base de datos: ' + d.base_de_datos),
+      h('p', { class: 'ayuda' }, 'La ventana clásica sigue disponible con: python bot.py --clasica'),
+      h('div', { class: 'fila' }, boton('Buscar actualizaciones', (ev) => buscarActualizaciones(ev.currentTarget), '', { 'data-buscar-actualizaciones': '1' }))));
   };
 
   // ------------------------------------------------------------------ arranque
@@ -4884,6 +4941,7 @@
     $('#version').textContent = 'v' + E.estado.version;
     $('#version').title = 'Bot Web ' + E.estado.version;
     if (E.estado.trabajo) { E.trabajo = E.estado.trabajo; pintarTrabajo(); }
+    pintarActualizacion(E.estado.actualizacion || null);          // v3.9
     try { E.ayuda = await api('GET', 'ayuda'); } catch (e) { /* se pide luego */ }
     refrescarCampana();
     await navegar();

@@ -119,6 +119,30 @@ JS_CASILLA_MARCADA = r"""e => {
   if (i && /^[CU]$/i.test(i.value || '')) return /^c$/i.test(i.value);
   return null;
 }"""
+# v3.8: calendario de DevExpress (ASPxDateEdit, p. ej. «Fecha Desde» del ERP): la fecha de verdad la guarda el control
+# (…_State, rawValue) y su máscara devuelve al campo esa fecha al salir de él, así que escribir el texto no basta: se
+# pone con su API (SetDate), como al elegir un día en su calendario.  null si el campo no es uno de estos calendarios.
+JS_DX_PONER_FECHA = r"""(el, f) => {
+  const w = el.ownerDocument.defaultView;
+  const id = String(el.id || '').replace(/_I$/, '');
+  if (!id || id === el.id) return null;
+  let c = null;
+  try {
+    const col = w.ASPxClientControl && w.ASPxClientControl.GetControlCollection && w.ASPxClientControl.GetControlCollection();
+    c = col && (typeof col.GetByName === 'function' ? col.GetByName(id) : (typeof col.Get === 'function' ? col.Get(id) : null));
+  } catch (e) { c = null; }
+  if (!c) { try { c = w[id] || null; } catch (e) { c = null; } }
+  if (!c) {      // con otro ClientInstanceName: el control cuyo campo es este
+    try {
+      const col = w.ASPxClientControl.GetControlCollection();
+      if (typeof col.ForEachControl === 'function') col.ForEachControl((x) => { if (!c && x && typeof x.GetInputElement === 'function' && x.GetInputElement() === el) c = x; });
+    } catch (e) { c = c || null; }
+  }
+  if (!c || typeof c.SetDate !== 'function' || typeof c.GetDate !== 'function') return null;
+  c.SetDate(new w.Date(f[0], f[1] - 1, f[2]));
+  const d = c.GetDate();
+  return { ok: !!d && d.getFullYear() === f[0] && d.getMonth() === f[1] - 1 && d.getDate() === f[2], texto: el.value || '' };
+}"""
 # v3.6.1: lo que dice el formato de fecha de una casilla antes de escribir (su valor y su placeholder)
 JS_PISTAS_FECHA = "e => ({valor: ('value' in e && !e.isContentEditable) ? (e.value || '') : '', " \
                   "placeholder: e.getAttribute('placeholder') || ''})"
@@ -1377,6 +1401,8 @@ class Ejecutor:
             combo = False
         if combo and self._escribir_combo(pg, loc, valor, ms, solo_lectura):
             return
+        if self._fecha_devexpress(loc, valor):
+            return
         if not solo_lectura:
             try:
                 pistas = loc.evaluate(JS_PISTAS_FECHA)
@@ -1400,6 +1426,24 @@ class Ejecutor:
         actual = loc.evaluate(JS_LEER_VALOR)
         if (actual or "").strip() != valor.strip():
             raise ErrorPaso("No se pudo escribir el valor en el campo (la página lo rechazó o lo borró)")
+
+    def _fecha_devexpress(self, loc, valor):
+        """v3.8: si el campo es un calendario de DevExpress (ERP) y lo que se escribe es una fecha, la pone con la API del
+        calendario (SetDate).  Devuelve True si quedó puesta; False para seguir escribiendo como siempre."""
+        from playwright.sync_api import Error as ErrorPW
+        fecha, _formato = leer_fecha(valor)
+        if fecha is None:
+            return False
+        try:
+            r = loc.evaluate(JS_DX_PONER_FECHA, [fecha.year, fecha.month, fecha.day])
+        except ErrorPW:
+            return False
+        if not r:
+            return False
+        if not r.get("ok"):
+            raise ErrorPaso("El calendario no aceptó la fecha «%s» (¿está fuera de las fechas que permite?)" % valor)
+        self._log("    (calendario de DevExpress: fecha puesta en el calendario; se ve «%s»)" % self._limpiar(str(r.get("texto") or ""))[:30])
+        return True
 
     @staticmethod
     def _valor_quedo(loc, valor):

@@ -22,6 +22,10 @@ endlocal & exit /b %BOTWEB_CODIGO%
 #    BOTWEB_FUENTE=local|github    de donde sacar el codigo (por defecto: la carpeta de al lado si la hay)
 #    BOTWEB_URL_CODIGO=http://...  otro .zip del codigo (en vez del de GitHub)
 #    BOTWEB_SOLO_FUNCIONES=1       solo define las funciones (para probarlas) y no instala nada
+#
+#  Modo actualización (lo usa el botón «Actualizar» del bot; v3.9):
+#    BOTWEB_ACTUALIZAR=1           no pregunta nada, espera a que Bot Web se cierre y al terminar lo vuelve a abrir
+#    BOTWEB_ESPERAR_PID=N          el proceso del bot que pidió la actualización (se espera a que termine)
 # ============================================================================================================
 
 $ErrorActionPreference = 'Stop'
@@ -31,7 +35,7 @@ try { [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::S
 
 $VersionPython = '3.13.16'
 $UrlPython = "https://www.python.org/ftp/python/$VersionPython/python-$VersionPython-amd64.exe"
-$UrlCodigo = 'https://github.com/Rfalso014/Mapez/archive/refs/heads/main.zip'
+$UrlCodigo = 'https://github.com/Rfalso014/Mapez/archive/refs/heads/New-tool.zip'
 if ($env:BOTWEB_URL_CODIGO) { $UrlCodigo = $env:BOTWEB_URL_CODIGO }
 
 # Carpeta: %USERPROFILE%\BotWeb (y no %LOCALAPPDATA%): si el Python del equipo es el de la Microsoft Store, todo lo que
@@ -43,7 +47,8 @@ $Log = Join-Path $Base 'instalacion.log'
 $VenvPy = Join-Path $App '.venv\Scripts\python.exe'
 $VenvPyw = Join-Path $App '.venv\Scripts\pythonw.exe'
 $Marca = '.instalado-por-botweb'
-$NoPreguntar = ($env:BOTWEB_NO_PREGUNTAR -eq '1')
+$Actualizando = ($env:BOTWEB_ACTUALIZAR -eq '1')
+$NoPreguntar = ($env:BOTWEB_NO_PREGUNTAR -eq '1') -or $Actualizando
 $SinAccesos = ($env:BOTWEB_SIN_ACCESOS -eq '1')
 $Fuente = "$env:BOTWEB_FUENTE".Trim().ToLower()
 $Script = $env:BOTWEB_SCRIPT
@@ -311,6 +316,59 @@ function Procesos-DelBot {
     } catch { return @() }
 }
 
+function Esperar-BotCerrado([int]$segundosPid = 120, [int]$segundosTareas = 300) {
+    # Modo actualización: espera a que se cierre el bot que pidió actualizar y, si hay una tarea programada del bot en
+    # marcha, a que termine (como mucho unos minutos); lo que quede abierto despues lo cierra Cerrar-BotAbierto.
+    $id = 0
+    if ([int]::TryParse("$env:BOTWEB_ESPERAR_PID", [ref]$id) -and $id -gt 0 -and (Get-Process -Id $id -ErrorAction SilentlyContinue)) {
+        Info 'Esperando a que Bot Web se cierre...'
+        try { Wait-Process -Id $id -Timeout $segundosPid -ErrorAction Stop } catch { Escribir-Log "      El proceso $id sigue abierto." }
+    }
+    $limite = (Get-Date).AddSeconds($segundosTareas)
+    $dicho = $false
+    while ((Procesos-DelBot).Count -gt 0 -and (Get-Date) -lt $limite) {
+        if (-not $dicho) { Info 'Bot Web está terminando una tarea: se espera a que acabe...'; $dicho = $true }
+        Start-Sleep -Seconds 3
+    }
+}
+
+function Url-Api([string]$urlZip) {
+    # La direccion de la API de GitHub con el ultimo cambio de esa rama (o $null si el .zip no es de GitHub).
+    $m = [regex]::Match($urlZip, '^https://github\.com/([^/]+)/([^/]+)/archive/refs/heads/(.+)\.zip$')
+    if (-not $m.Success) { return $null }
+    return 'https://api.github.com/repos/{0}/{1}/commits/{2}' -f $m.Groups[1].Value, $m.Groups[2].Value, $m.Groups[3].Value
+}
+
+function Leer-Commit([string]$url) {
+    # @{sha; fecha; mensaje} del ultimo cambio (para saber luego si hay una version nueva) o $null.  Nunca falla.
+    if (-not $url) { return $null }
+    try {
+        $req = Nueva-Conexion $url 'GET'
+        $resp = $req.GetResponse()
+        try { $lector = New-Object IO.StreamReader($resp.GetResponseStream(), [Text.Encoding]::UTF8); $json = $lector.ReadToEnd() } finally { $resp.Close() }
+        $d = $json | ConvertFrom-Json
+        $sha = ("" + $d.sha).Trim().ToLower()
+        if ($sha -notmatch '^[0-9a-f]{40}$') { return $null }
+        $fecha = "" + $d.commit.committer.date
+        if ($d.commit.committer.date -is [datetime]) { $fecha = $d.commit.committer.date.ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ') }
+        $mensaje = (("" + $d.commit.message) -split "`r?`n")[0]
+        return @{ sha = $sha; fecha = $fecha; mensaje = $mensaje }
+    } catch {
+        Escribir-Log ("      No se pudo leer la version de GitHub: {0}" -f $_.Exception.Message)
+        return $null
+    }
+}
+
+function Escribir-Version([string]$carpeta, $commit) {
+    # actualizacion.json: la version instalada (la usa el aviso «Hay una nueva actualización» del bot).
+    $datos = [ordered]@{ sha = $commit.sha; fecha = $commit.fecha; mensaje = $commit.mensaje; rama = 'New-tool'; origen = 'instalador' }
+    [IO.File]::WriteAllText((Join-Path $carpeta 'actualizacion.json'), ($datos | ConvertTo-Json), (New-Object Text.UTF8Encoding($false)))
+}
+
+function Abrir-Bot {
+    Start-Process -FilePath $VenvPyw -ArgumentList (Citar (Join-Path $App 'bot.py')) -WorkingDirectory $App
+}
+
 function Cerrar-BotAbierto {
     $procesos = Procesos-DelBot
     if ($procesos.Count -eq 0) { return }
@@ -388,7 +446,8 @@ function Principal {
     Escribir-Log '================================================================'
     Escribir-Log ("Instalar Bot Web - {0} - Windows {1} - instalador: {2}" -f (Get-Date), [Environment]::OSVersion.Version, $Script)
     Write-Host ''
-    Write-Host '  Instalador de Bot Web' -ForegroundColor White
+    if ($Actualizando) { Write-Host '  Actualizando Bot Web (tus reportes y datos se conservan)' -ForegroundColor White }
+    else { Write-Host '  Instalador de Bot Web' -ForegroundColor White }
     Write-Host '  Se instala solo para tu usuario. No cierres esta ventana hasta que termine.'
 
     # ---------------------------------------------------------------------------------------------- 1
@@ -427,6 +486,7 @@ function Principal {
 
     # ---------------------------------------------------------------------------------------------- 3
     $temporal = Join-Path $env:TEMP ('BotWeb_' + [guid]::NewGuid().ToString('N').Substring(0, 8))
+    $commit = $null
     try {
         if ($local) {
             Paso 3 'Copiando el bot...'
@@ -436,9 +496,10 @@ function Principal {
             Paso 3 'Descargando el bot de Internet...'
             New-Item -ItemType Directory -Force -Path $temporal | Out-Null
             $zip = Join-Path $temporal 'bot.zip'
+            $commit = Leer-Commit (Url-Api $UrlCodigo)          # (antes de descargar: la version que se instala)
             try { Descargar $UrlCodigo $zip } catch {
                 if ("$($_.Exception.Message)" -match '\(404\)') {
-                    Fallar 'GitHub dice que el bot no existe (404): el repositorio no es público o la rama main no existe. Pide a quien te pasó el bot la carpeta completa y abre el instalador desde ella.'
+                    Fallar 'GitHub dice que el bot no existe (404): el repositorio no es público o la rama New-tool no existe. Pide a quien te pasó el bot la carpeta completa y abre el instalador desde ella.'
                 }
                 Fallar 'No se pudo descargar el bot de github.com. Revisa la conexión a Internet.'
             }
@@ -456,6 +517,8 @@ function Principal {
         foreach ($necesario in @('bot.py', 'requirements.txt', 'webbot', 'ui')) {
             if (-not (Test-Path -LiteralPath (Join-Path $nuevo $necesario))) { Fallar "Al bot le falta «$necesario». La copia no está completa." }
         }
+        if ($commit) { Escribir-Version $nuevo $commit }
+        if ($Actualizando) { Esperar-BotCerrado }
         Cerrar-BotAbierto
         try { Poner-Codigo $nuevo } catch { Fallar ('No se pudo copiar el bot a {0}. Cierra Bot Web y vuelve a intentarlo. ({1})' -f $App, $_.Exception.Message) }
         Info ("{0} archivos en {1}" -f $script:Copiados, $App)
@@ -550,14 +613,19 @@ function Principal {
     Info 'OK: Bot Web funciona.'
 
     Write-Host ''
-    Write-Host '  ¡Listo! Bot Web quedó instalado.' -ForegroundColor Green
+    if ($Actualizando) { Write-Host '  ¡Listo! Bot Web quedó actualizado.' -ForegroundColor Green }
+    else { Write-Host '  ¡Listo! Bot Web quedó instalado.' -ForegroundColor Green }
     Write-Host "  Carpeta del bot: $App"
     Write-Host "  Tus reportes descargados irán a: $(Join-Path $App 'descargas')"
     if (-not $SinAccesos) { Write-Host '  Para abrirlo: «Bot Web» en el Escritorio o en el menú Inicio.' }
     Escribir-Log 'Instalación terminada: OK'
     Write-Host ''
-    if (-not $NoPreguntar -and (Preguntar '  ¿Abrir Bot Web ahora?' $true)) {
-        Start-Process -FilePath $VenvPyw -ArgumentList (Citar (Join-Path $App 'bot.py')) -WorkingDirectory $App
+    if ($Actualizando) {
+        Write-Host '  Se abre Bot Web...'
+        Abrir-Bot
+        Start-Sleep -Seconds 3
+    } elseif (-not $NoPreguntar -and (Preguntar '  ¿Abrir Bot Web ahora?' $true)) {
+        Abrir-Bot
     }
 }
 
@@ -575,6 +643,15 @@ try {
     Write-Host ''
     Write-Host '  Puedes volver a abrir el instalador: sigue donde se quedó y no borra nada tuyo.'
     Write-Host "  Detalles en: $Log"
+    if ($Actualizando) {
+        # (modo actualización: se vuelve a abrir el bot que habia y se deja leer el mensaje)
+        if ((Test-Path -LiteralPath $VenvPyw) -and (Test-Path -LiteralPath (Join-Path $App 'bot.py'))) {
+            Write-Host '  Se vuelve a abrir Bot Web.'
+            try { Abrir-Bot } catch { Escribir-Log ("      No se pudo abrir el bot: {0}" -f $_.Exception.Message) }
+        }
+        Write-Host ''
+        try { [void](Read-Host 'Pulsa Intro para cerrar esta ventana') } catch { }
+    }
     Pausa
     exit 1
 }

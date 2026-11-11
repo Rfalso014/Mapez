@@ -251,7 +251,8 @@ class PruebaArchivosInstalador(unittest.TestCase):
         for carpeta in ("'datos'", "'perfiles'", "'registros'", "'descargas'", "'.git'", "'tests'", "'__pycache__'"):
             self.assertIn(carpeta, texto)
         self.assertIn("flujos\\*.json", texto)
-        self.assertIn("https://github.com/Rfalso014/Mapez/archive/refs/heads/main.zip", texto)
+        self.assertIn("https://github.com/Rfalso014/Mapez/archive/refs/heads/New-tool.zip", texto)    # (v3.9: rama New-tool)
+        self.assertNotIn("refs/heads/main.zip", texto)
 
     def test_desinstalador_usa_el_servicio_de_secretos(self):
         from webbot import secretos

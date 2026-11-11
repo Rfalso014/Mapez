@@ -12,5 +12,8 @@ __pycache__/
 *.pyc
 .venv/
 
+# La versión instalada (la escriben el instalador, el paquete y el botón «Actualizar»; v3.9)
+/actualizacion.json
+
 # Paquete para compartir (se crea con instalador/crear_paquete.py)
 paquete/

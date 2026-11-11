@@ -33,6 +33,9 @@
   - Rejilla ASPxGridView con su fila de filtros por columna («…_DXFREditorcolN»): no son filtros del reporte.
   - «Ver bajas»: ASPxCheckBox (un <span> con la clase …Checked/…Unchecked y un <input> oculto «…_S» con C/U).
   «Exportar» descarga /api/erp/descarga?almacen=<empleado>|<ubicación>|<bajas>&fecha=<desde>-<hasta>.
+  Las fechas son como las del ERP real (ASPxDateEdit con máscara): la fecha de verdad está en el control (…_State,
+  rawValue); lo que se pone en el campo sin teclear (fill, JavaScript) no cuenta y, al salir del campo, vuelve la fecha
+  del control.  El control se cambia con SetDate (ASPxClientControl.GetControlCollection().GetByName(id)) o tecleando.
 -->
   <table>
     <tr>
@@ -42,6 +45,7 @@
           <td><input type="text" class="dxeEditArea_DevEx dxeEditAreaSys" id="ctl00_formContent_dteFechaDesde_I" name="ctl00$formContent$dteFechaDesde" value="28/09/2026" style="border:0;width:90px"></td>
           <td class="dxeButtonEditButton" id="ctl00_formContent_dteFechaDesde_B-1">▾</td>
         </tr></table>
+        <input type="hidden" id="ctl00_formContent_dteFechaDesde_State" name="ctl00$formContent$dteFechaDesde$State" value="">
         <div id="ctl00_formContent_dteFechaDesde_DDD_C" style="display:none">(calendario)</div>
       </td>
       <td>Hasta</td>
@@ -50,6 +54,7 @@
           <td><input type="text" class="dxeEditArea_DevEx dxeEditAreaSys" id="ctl00_formContent_dteFechaHasta_I" name="ctl00$formContent$dteFechaHasta" value="28/10/2026" style="border:0;width:90px"></td>
           <td class="dxeButtonEditButton" id="ctl00_formContent_dteFechaHasta_B-1">▾</td>
         </tr></table>
+        <input type="hidden" id="ctl00_formContent_dteFechaHasta_State" name="ctl00$formContent$dteFechaHasta$State" value="">
         <div id="ctl00_formContent_dteFechaHasta_DDD_C" style="display:none">(calendario)</div>
       </td>
     </tr>
@@ -149,6 +154,28 @@
   </table>
   <div id="resultado" style="margin-top:10px"></div>
   <script>
+    // ASPxDateEdit con máscara (como el ERP real): la fecha de verdad es la del control, no el texto del campo
+    var controles = {};
+    window.ASPxClientControl = { GetControlCollection: function () {
+      return { GetByName: function (n) { return controles[n] || null; }, Get: function (n) { return controles[n] || null; } }; } };
+    function fmtFecha(d) { return d ? ('0' + d.getDate()).slice(-2) + '/' + ('0' + (d.getMonth() + 1)).slice(-2) + '/' + d.getFullYear() : ''; }
+    function leerFecha(t) { var m = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(t || ''); return m ? new Date(+m[3], +m[2] - 1, +m[1]) : null; }
+    ['ctl00_formContent_dteFechaDesde', 'ctl00_formContent_dteFechaHasta'].forEach(function (id) {
+      var inp = document.getElementById(id + '_I'), st = document.getElementById(id + '_State');
+      var fecha = leerFecha(inp.value), tecleado = false;
+      var c = {
+        SetDate: function (d) { fecha = d ? new Date(d.getFullYear(), d.getMonth(), d.getDate()) : null; inp.value = fmtFecha(fecha);
+          st.value = JSON.stringify({ rawValue: fecha ? String(fecha.getTime()) : 'N' }); },
+        GetDate: function () { return fecha ? new Date(fecha.getTime()) : null; }
+      };
+      controles[id] = c; window[id] = c;
+      inp.addEventListener('keydown', function () { tecleado = true; });
+      inp.addEventListener('blur', function () {
+        if (tecleado) { var d = leerFecha(inp.value); if (d) c.SetDate(d); }
+        inp.value = fmtFecha(fecha); tecleado = false;
+      });
+      c.SetDate(fecha);
+    });
     // ASPxComboBox (Vista y formato): abrir con el campo o el botón «…_B-1», elegir una fila
     ['ITCNT0_cbo0', 'ITCNT4_cbo4'].forEach(function (k) {
       var base = 'ctl00_formContent_wuc_1000_01_GridViewToolbar1_wuc100001_mainMenu_' + k;
@@ -185,7 +212,7 @@
     function v(id) { return document.getElementById(id).value; }
     document.getElementById(menu + 'DXI6_').addEventListener('click', function () {
       consultado = [v('wbeEmpleado_txtCod_I'), v('wbeUbicacion_txtCod_I'), chkVal.value].join('|') + '#' +
-        v('ctl00_formContent_dteFechaDesde_I') + '-' + v('ctl00_formContent_dteFechaHasta_I');
+        fmtFecha(controles.ctl00_formContent_dteFechaDesde.GetDate()) + '-' + fmtFecha(controles.ctl00_formContent_dteFechaHasta.GetDate());
       document.getElementById('resultado').textContent = 'Consulta: ' + consultado;
     });
     document.getElementById(menu + 'DXI5_').addEventListener('click', function () {

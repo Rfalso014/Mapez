@@ -3,8 +3,14 @@
    sistema pide «reducir movimiento»; a 400 px de ancho, nada se sale de la pantalla. */
 * { box-sizing: border-box; }
 html, body { margin: 0; min-height: 100%; }
+/* v3.9: la página NUNCA se desplaza en horizontal, a ningún ancho.  «clip» (y no «hidden») no crea una zona de
+   desplazamiento: la barra de arriba sigue fija (sticky) y el desplazamiento vertical no cambia.  Además, lo largo
+   (nombres, direcciones, rutas) se parte en varias líneas en vez de salirse. */
+html, body { max-width: 100%; overflow-x: clip; }
+.app { max-width: 100%; overflow-x: clip; }
+img, video, canvas { max-width: 100%; }
 body { font: 15px/1.45 var(--f-texto); color: var(--texto); background: var(--fondo); -webkit-font-smoothing: antialiased;
-       font-variant-numeric: tabular-nums; }
+       font-variant-numeric: tabular-nums; overflow-wrap: break-word; }
 a { color: var(--vivo); text-decoration: none; }
 a:hover { text-decoration: underline; }
 button, input, select, textarea { font: inherit; color: inherit; }
@@ -70,13 +76,22 @@ kbd { font: 11px var(--f-mono); border: 1px solid var(--linea); padding: 2px 6px
 .progreso { height: 6px; background: var(--linea); border-radius: 3px; overflow: hidden; margin-top: 7px; }
 .progreso > div:not(.tren) { height: 100%; background: var(--vivo); width: 0; transition: width .6s linear; }
 
+/* v3.9: «Hay una nueva actualización» (arriba de todo; «Más tarde» lo esconde hasta que se vuelva a abrir el bot) */
+.aviso-act { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; background: var(--panel); border: 1.5px solid var(--info);
+             border-radius: var(--radio); padding: 12px 16px; min-width: 0; }
+.aviso-act > svg.ico { width: 20px; height: 20px; color: var(--info); }
+.aviso-act .crece { flex: 1 1 220px; min-width: 0; }
+.aviso-act strong { display: block; font-weight: 700; overflow-wrap: anywhere; }
+.aviso-act .novedades { color: var(--suave); font-size: 13px; overflow-wrap: anywhere; }
+.aviso-act .botones { display: flex; flex-wrap: wrap; gap: 8px; }
+
 #contenido { outline: none; min-width: 0; }
 .vista { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
 
 /* ------------------------------------------------------------------ botones */
 .boton { display: inline-flex; align-items: center; justify-content: center; gap: 7px; border: 1.5px solid var(--tinta); background: var(--papel);
-         color: var(--texto); padding: 7px 16px; border-radius: 999px; font-size: 14px; font-weight: 600; line-height: 1.3; white-space: nowrap;
-         min-height: 38px; transition: border-color .12s, background-color .12s, transform .12s; }
+         color: var(--texto); padding: 7px 16px; border-radius: 999px; font-size: 14px; font-weight: 600; line-height: 1.3;
+         white-space: nowrap; min-height: 38px; max-width: 100%; transition: border-color .12s, background-color .12s, transform .12s; }
 .boton:hover { background: var(--suelo); transform: translateY(-1px); }
 .boton:active { transform: scale(.98); }
 .boton.primario { background: var(--marca); border-color: var(--marca); color: var(--sobre-marca); font-weight: 700; }
@@ -106,7 +121,7 @@ kbd { font: 11px var(--f-mono); border: 1px solid var(--linea); padding: 2px 6px
 .panel > h2 a { color: inherit; }
 .panel h3 { margin: 6px 0 0; font: 700 16px var(--f-titulo); color: var(--texto); }
 .tarjeta > header { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 12px 16px; border-bottom: 1px solid var(--linea); }
-.tarjeta > header .meta { margin-left: auto; font: 11.5px var(--f-mono); color: var(--suave); display: flex; align-items: center; gap: 6px; }
+.tarjeta > header .meta { margin-left: auto; font: 11.5px var(--f-mono); color: var(--suave); display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
 .tarjeta > footer { display: flex; flex-wrap: wrap; gap: 8px; padding: 10px 16px; border-top: 1px solid var(--linea); }
 .ayuda { color: var(--suave); font-size: 13px; margin: 0; overflow-wrap: anywhere; }
 p.ayuda + p.ayuda { margin-top: -2px; }
@@ -177,7 +192,7 @@ p.ayuda + p.ayuda { margin-top: -2px; }
 @keyframes latido { 50% { box-shadow: 0 0 0 7px rgba(10, 107, 122, 0); } }
 
 /* en vivo */
-.feed { list-style: none; margin: 0; padding: 6px 0; max-height: 470px; overflow: auto; }
+.feed { list-style: none; margin: 0; padding: 6px 0; max-height: 470px; overflow-x: hidden; overflow-y: auto; }
 .feed li { display: grid; grid-template-columns: 46px minmax(0, 1fr); gap: 10px; padding: 8px 16px; font-size: 13px; line-height: 1.45; }
 .feed li.nuevo { animation: entra .5s ease-out; }
 @keyframes entra { from { opacity: .2; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
@@ -212,7 +227,8 @@ p.ayuda + p.ayuda { margin-top: -2px; }
 .lista li.vacio { color: var(--suave); }
 
 .chip { display: inline-flex; align-items: center; gap: 4px; font-size: 11.5px; padding: 1px 8px; border-radius: 999px; background: transparent;
-        border: 1px solid var(--linea-2); color: var(--suave); white-space: nowrap; line-height: 1.6; max-width: 100%; }
+        border: 1px solid var(--linea-2); color: var(--suave); white-space: nowrap; line-height: 1.6; max-width: 100%;
+        flex: 0 0 auto; overflow: hidden; text-overflow: ellipsis; }
 .chip.ok { color: var(--ok); border-color: rgba(11, 110, 71, .35); background: var(--ok-suave); }
 .chip.error { color: var(--error); border-color: rgba(179, 22, 44, .35); background: var(--error-suave); }
 .chip.aviso { color: var(--aviso); border-color: rgba(138, 90, 0, .35); background: var(--aviso-suave); }
@@ -231,7 +247,7 @@ a.chip { text-decoration: none; }
 table.tabla { width: 100%; border-collapse: collapse; }
 .tabla th { text-align: left; font: 500 11px var(--f-texto); letter-spacing: .08em; text-transform: uppercase; color: var(--suave);
             padding: 8px; border-bottom: 1px solid var(--linea); }
-.tabla td { padding: 9px 8px; border-bottom: 1px solid var(--linea); vertical-align: middle; }
+.tabla td { padding: 9px 8px; border-bottom: 1px solid var(--linea); vertical-align: middle; overflow-wrap: anywhere; }
 .tabla tr:last-child td { border-bottom: 0; }
 .tabla tr:hover td { background: var(--hover); }
 .tabla tr.actual td { background: var(--vivo-suave); }
@@ -242,7 +258,7 @@ table.tabla { width: 100%; border-collapse: collapse; }
 .tabla .acciones > .fila { justify-content: flex-end; flex-wrap: wrap; gap: 4px; }
 .tabla .detalle { max-width: 520px; overflow-wrap: anywhere; font: 12px var(--f-mono); color: var(--suave); }
 .tabla .num-paso { font: 12px var(--f-mono); color: var(--suave); width: 36px; }
-.envoltorio-tabla { overflow-x: auto; min-width: 0; }
+.envoltorio-tabla { min-width: 0; max-width: 100%; }          /* (v3.9: sin barra horizontal: las celdas se parten) */
 .problema { color: var(--error); font-size: 12.5px; margin-top: 3px; }
 
 /* ------------------------------------------------------------------ formularios */
@@ -285,13 +301,13 @@ details.config-pagina[open] > summary, details.opciones[open] > summary { margin
 .alerta strong { color: inherit; }
 
 .registro { background: var(--tinta); color: #e8efe9; font: 12px/1.5 var(--f-mono); border: 1px solid var(--linea); border-radius: var(--radio-chico);
-            padding: 12px; max-height: 60vh; overflow: auto; white-space: pre-wrap; word-break: break-word; margin: 0; }
+            padding: 12px; max-height: 60vh; overflow-x: hidden; overflow-y: auto; white-space: pre-wrap; word-break: break-word; overflow-wrap: anywhere; margin: 0; }
 .captura { max-width: 100%; border-radius: var(--radio-chico); border: 1px solid var(--linea); }
 
 /* ------------------------------------------------------------------ ventanas (modales) y paleta */
 .modal-fondo { position: fixed; inset: 0; background: var(--velo); display: grid; place-items: center; z-index: 50; padding: 16px; }
 .modal { background: var(--panel); border: 1px solid var(--linea-2); border-radius: 12px; width: min(620px, 100%); max-height: calc(100vh - 32px);
-         overflow: auto; box-shadow: var(--sombra); padding: 20px 22px; display: flex; flex-direction: column; gap: 12px; animation: aparece .18s ease-out; }
+         overflow-x: hidden; overflow-y: auto; overflow-wrap: break-word; min-width: 0; box-shadow: var(--sombra); padding: 20px 22px; display: flex; flex-direction: column; gap: 12px; animation: aparece .18s ease-out; }
 @keyframes aparece { from { opacity: 0; transform: translateY(6px) scale(.99); } to { opacity: 1; transform: none; } }
 .modal.ancho { width: min(980px, 100%); }
 .modal h2 { margin: 0; font: 600 19px/1.25 var(--f-titulo); overflow-wrap: anywhere; }
@@ -308,7 +324,7 @@ details.config-pagina[open] > summary, details.opciones[open] > summary { margin
 .paleta-entrada svg.ico { width: 18px; height: 18px; }
 .paleta-entrada input { border: 0; background: transparent; padding: 15px 0; font-size: 15px; min-height: 0; box-shadow: none; }
 .paleta-entrada input:focus { box-shadow: none; }
-.paleta ul { list-style: none; margin: 0; padding: 6px; max-height: min(52vh, 380px); overflow: auto; }
+.paleta ul { list-style: none; margin: 0; padding: 6px; max-height: min(52vh, 380px); overflow-x: hidden; overflow-y: auto; }
 .paleta li { display: flex; gap: 10px; align-items: center; padding: 9px 10px; border-radius: 7px; font-size: 13.5px; cursor: pointer; min-width: 0; }
 .paleta li .t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .paleta li svg.ico { color: var(--suave); }
@@ -341,11 +357,11 @@ details.config-pagina[open] > summary, details.opciones[open] > summary { margin
 .filtro { border: 1px solid var(--linea); border-radius: var(--radio); padding: 12px 14px; background: var(--panel-2); display: flex; flex-direction: column; gap: 8px; min-width: 0; }
 .filtro .filtro-cab strong { font-weight: 600; }
 .filtro .sub { color: var(--suave); font-size: 12px; }
-.opciones-multi { max-height: 220px; overflow: auto; border: 1px solid var(--linea); border-radius: var(--radio-chico); padding: 0 10px; background: var(--campo); }
+.opciones-multi { max-height: 220px; overflow-x: hidden; overflow-y: auto; overflow-wrap: anywhere; border: 1px solid var(--linea); border-radius: var(--radio-chico); padding: 0 10px; background: var(--campo); }
 .opciones-multi li { padding: 6px 0; }
-.opciones-lista { max-height: 160px; overflow: auto; font: 12px var(--f-mono); color: var(--suave); margin: 4px 0 0; padding-left: 20px; }
+.opciones-lista { max-height: 160px; overflow-x: hidden; overflow-y: auto; overflow-wrap: anywhere; font: 12px var(--f-mono); color: var(--suave); margin: 4px 0 0; padding-left: 20px; }
 .mapa-config { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
-.mapa-config select, .mapa-config input { width: auto; min-width: 140px; max-width: 100%; }
+.mapa-config select, .mapa-config input { width: auto; min-width: min(140px, 100%); max-width: 100%; }
 
 /* v3.2: Páginas */
 .tarjetas-paginas { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(320px, 100%), 1fr)); gap: 16px; }
@@ -371,7 +387,7 @@ details.config-pagina[open] > summary, details.opciones[open] > summary { margin
 .cuando > select { max-width: 560px; }
 .cuando-cuerpo, .cuando-reglas { display: flex; flex-direction: column; gap: 10px; }
 .cuando-regla { border: 1px solid var(--linea); border-radius: var(--radio); padding: 12px 14px; background: var(--panel-2); display: flex; flex-direction: column; gap: 10px; }
-.cuando-regla > .fila select { width: auto; min-width: 230px; max-width: 100%; }
+.cuando-regla > .fila select { width: auto; min-width: min(230px, 100%); max-width: 100%; }
 .cuando-campo { display: flex; gap: 12px; align-items: flex-start; }
 .cuando-etq { flex: 0 0 96px; color: var(--suave); padding-top: 6px; font-size: 13px; }
 .cuando-campo .crece { flex: 1; min-width: 0; }
@@ -401,7 +417,7 @@ code.comando { display: block; font: 12px/1.45 var(--f-mono); background: var(--
 .correo-seccion h3 { margin: 0; font: 600 13px var(--f-titulo); letter-spacing: .08em; text-transform: uppercase; color: var(--vivo); }
 .correo-seccion textarea { font-family: var(--f-texto); min-height: 44px; }
 .correo-accion { border: 1px solid var(--linea); border-radius: var(--radio); padding: 12px 14px; background: var(--panel-2); display: flex; flex-direction: column; gap: 8px; }
-.correo-accion > .fila select { width: auto; min-width: 260px; max-width: 100%; }
+.correo-accion > .fila select { width: auto; min-width: min(260px, 100%); max-width: 100%; }
 [data-prueba-correo] .lista li { align-items: flex-start; }
 .ayuda-correo summary { font-weight: 500; }
 .lista.relacionados li.mas-reciente { background: var(--marca-suave); border-radius: var(--radio-chico); padding-left: 8px; padding-right: 8px; }
@@ -423,7 +439,7 @@ code.comando { display: block; font: 12px/1.45 var(--f-mono); background: var(--
 .fecha-valor { font: 500 12.5px var(--f-mono); color: var(--vivo); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .campo-fecha .fecha-vista:empty { display: none; }
 .fecha-pop { position: fixed; z-index: 60; background: var(--panel); border: 1px solid var(--linea-2); border-radius: 12px; box-shadow: var(--sombra);
-  padding: 12px; display: flex; flex-direction: column; gap: 10px; max-height: calc(100vh - 16px); overflow: auto; animation: aparece .14s ease-out; }
+  padding: 12px; display: flex; flex-direction: column; gap: 10px; max-height: calc(100vh - 16px); max-width: calc(100vw - 16px); overflow-x: hidden; overflow-y: auto; animation: aparece .14s ease-out; }
 .fecha-modos { display: grid; grid-template-columns: 1fr 1fr; gap: 0; border: 1px solid var(--linea-2); border-radius: var(--radio-chico); overflow: hidden; }
 .fecha-modo { border: 0; background: transparent; color: var(--suave); padding: 7px 8px; cursor: pointer; font-size: 13px; }
 .fecha-modo + .fecha-modo { border-left: 1px solid var(--linea-2); }
@@ -453,8 +469,8 @@ code.comando { display: block; font: 12px/1.45 var(--f-mono); background: var(--
 .fecha-error:empty { display: none; }
 .fecha-pie { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .fecha-pie .espacio { flex: 1; }
-.mapa-config .campo-fecha { min-width: 180px; }
-.fecha-rango { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 10px 14px; width: 100%; align-items: start; }
+.mapa-config .campo-fecha { min-width: min(180px, 100%); }
+.fecha-rango { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(210px, 100%), 1fr)); gap: 10px 14px; width: 100%; align-items: start; }
 .fecha-rango > div { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 
 /* ------------------------------------------------------------------ anchos */
@@ -505,7 +521,7 @@ code.comando { display: block; font: 12px/1.45 var(--f-mono); background: var(--
   .modal { padding: 16px; }
   .modal-fondo { padding: 8px; align-items: end; }
   .modal .pie .boton { flex: 1 1 auto; }
-  .boton { min-height: 36px; }
+  .boton { min-height: 36px; white-space: normal; }          /* (v3.9: un botón largo se parte en vez de salirse) */
   .boton.chico { min-height: 32px; }
   /* tablas: cada fila pasa a ser una tarjeta (sin barra horizontal) */
   table.tabla, .tabla thead, .tabla tbody, .tabla tr, .tabla td { display: block; width: 100%; }
@@ -641,7 +657,7 @@ code.comando { display: block; font: 12px/1.45 var(--f-mono); background: var(--
 
 /* Descargar por fecha: tarjetas, calendario y «Qué baja cada día» */
 .sf { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
-.sf-opciones { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; }
+.sf-opciones { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(170px, 100%), 1fr)); gap: 10px; }
 .sf-opcion { min-height: 84px; text-align: left; padding: 10px 16px; border-radius: 14px; border: 2px solid var(--linea); background: var(--panel); transition: transform .12s, border-color .12s; }
 .sf-opcion:hover { transform: translateY(-2px); border-color: var(--tinta); }
 .sf-opcion b { display: block; font: 700 18px var(--f-titulo); margin-bottom: 2px; }

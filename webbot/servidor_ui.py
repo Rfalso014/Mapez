@@ -175,6 +175,11 @@ class Aplicacion:
         self._externos_firma = None
         self._externos_cuando = 0.0
         self._externos_cerrojo = threading.Lock()
+        # v3.9: «Hay una nueva actualización».  None = no se mira GitHub (las pruebas y --smoke-web): solo la aplicación
+        # de verdad (`abrir_aplicacion`) pone un `actualizar.Actualizador`.  `salir` = cerrar el programa (al actualizar)
+        self.actualizador = None
+        self.actualizando = False
+        self.salir = threading.Event()
 
     # ----------------------------------------------------------- utilidades
     def _oculto(self, ver):
@@ -240,6 +245,8 @@ class Aplicacion:
             if self.trabajo is not None and self.trabajo.estado == "en_curso":
                 raise ErrorApi("Ya hay un trabajo en curso (%s). Espera a que termine o pulsa Detener."
                                % self.trabajo.descripcion, 409)
+            if self.actualizando:
+                raise ErrorApi("Bot Web se está actualizando: se cerrará y volverá a abrirse solo en unos minutos.", 409)
             t = Trabajo(tipo, descripcion, objetivo)
             self.trabajo = t
 
@@ -297,7 +304,62 @@ class Aplicacion:
                 "preguntas": self._preguntas(), "no_leidas": self.almacen.no_leidas(),
                 "grabando": self.grabador is not None, "mapeando": self.sesion_mapa is not None
                 and not self.sesion_mapa.terminada.is_set(), "al_iniciar": list(self.al_iniciar),
-                "guia_pendiente": bool(self.guia_al_abrir and not self.almacen.ajustes().get("guia_vista"))}
+                "guia_pendiente": bool(self.guia_al_abrir and not self.almacen.ajustes().get("guia_vista")),
+                "actualizacion": self.actualizador.estado() if self.actualizador is not None else None}
+
+    # ------------------------------------------------------- v3.9: actualizaciones
+    def _ocupado_para_actualizar(self):
+        """Qué está haciendo el bot ahora mismo (texto) o None si se puede actualizar."""
+        t = self.trabajo
+        if t is not None and t.estado == "en_curso":
+            return "«%s»" % t.descripcion
+        if self.grabador is not None:
+            return "una grabación"
+        if self.sesion_mapa is not None and not self.sesion_mapa.terminada.is_set():
+            return "el mapeo de una página"
+        externos = [x for x in self.revisar_en_curso(forzar=True) if not x.get("terminado")]
+        if externos:
+            return "una tarea programada (%s)" % (externos[0].get("nombre") or "en segundo plano")
+        return None
+
+    def _api_actualizacion(self, metodo, partes, datos, q):
+        """GET → lo último que se sabe.  POST actualizacion/comprobar («Buscar actualizaciones»),
+        actualizacion/mas-tarde y actualizacion/instalar («Actualizar»: se niega si el bot está trabajando)."""
+        from . import actualizar as mod_actualizar
+        act = self.actualizador
+        accion = partes[0] if partes else ""
+        if metodo != "POST" or not accion:
+            return act.estado() if act is not None else {"activo": False, "disponible": False}
+        if accion not in ("comprobar", "mas-tarde", "instalar"):
+            raise ErrorApi("Acción no válida", 404)
+        if act is None:
+            raise ErrorApi("La búsqueda de actualizaciones no está activa en esta ventana.", 409)
+        if accion == "comprobar":
+            return act.comprobar(manual=True)
+        if accion == "mas-tarde":
+            return act.posponer()
+        with self._cerrojo:
+            if self.actualizando:
+                raise ErrorApi("La actualización ya está en marcha.", 409)
+            ocupado = self._ocupado_para_actualizar()
+            if ocupado:
+                raise ErrorApi("Ahora mismo el bot está trabajando (%s). Espera a que termine y vuelve a pulsar "
+                               "«Actualizar»." % ocupado, 409)
+            self.actualizando = True
+        try:
+            res = act.actualizar(self.almacen.ruta)
+        except mod_actualizar.ErrorActualizar as e:
+            self.actualizando = False
+            raise ErrorApi(str(e), 409)
+        except BaseException:
+            self.actualizando = False
+            raise
+        self.eventos.emitir("actualizando", sha=res.get("sha", ""))
+        # (un momento para que la respuesta llegue a la ventana; luego el programa se cierra y el instalador sigue)
+        temporizador = threading.Timer(2.0, self.salir.set)
+        temporizador.daemon = True
+        temporizador.start()
+        return {"ok": True, "copia": res.get("copia") or ""}
 
     def _api_latido(self, metodo, partes, datos, q):
         self.ultimo_latido = time.monotonic()
@@ -3130,6 +3192,10 @@ def abrir_aplicacion(args):
     app.tareas_en_segundo_plano = True                # v3.5: la lista de tareas de Windows nunca hace esperar
     app.lanzar_proceso = programador.lanzar_desacoplado   # v3.6.1: solo la aplicación de verdad lanza el bot
     app.guia_al_abrir = True                              # v3.8: la primera vez, la guía con flechas
+    if os.environ.get("BOTWEB_SIN_ACTUALIZAR") != "1":    # v3.9: avisa si hay otra versión en GitHub (cada 6 h)
+        from . import actualizar as mod_actualizar
+        app.actualizador = mod_actualizar.Actualizador(registrar=lambda linea: print(linea, flush=True),
+                                                       emitir=app.eventos.emitir).iniciar_periodico()
     app.precargar_tareas()
     srv = ServidorUI(app, puerto=getattr(args, "puerto", 0)).iniciar()
     url = srv.url_con_token("reportes" if ids else "inicio")
@@ -3142,7 +3208,8 @@ def abrir_aplicacion(args):
     inicio = time.monotonic()
     try:
         while True:
-            time.sleep(2)
+            if app.salir.wait(2):
+                break                                    # v3.9: se actualiza (el instalador espera a que se cierre)
             ultimo = app.ultimo_latido
             ocupado = app.trabajo is not None and app.trabajo.estado == "en_curso"
             if ultimo is None:
@@ -3153,6 +3220,8 @@ def abrir_aplicacion(args):
                 break                                    # se cerró la ventana (sin latidos ni consultas durante 2 min)
     except KeyboardInterrupt:
         pass
+    if app.actualizador is not None:
+        app.actualizador.parar()
     app.detener()
     srv.parar()
     almacen.cerrar()
