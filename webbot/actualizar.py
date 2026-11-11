@@ -34,7 +34,9 @@ from . import RAIZ
 
 REPO = "Rfalso014/Mapez"
 RAMA = "New-tool"
-URL_API = "https://api.github.com/repos/%s/commits/%s" % (REPO, RAMA)
+# La lista con el último cambio (sin los archivos): /commits/<rama> trae además todos los archivos cambiados y, con un
+# cambio grande, pasa de 1 MB y se cortaba.
+URL_API = "https://api.github.com/repos/%s/commits?sha=%s&per_page=1" % (REPO, RAMA)
 URL_ZIP = "https://github.com/%s/archive/refs/heads/%s.zip" % (REPO, RAMA)
 AGENTE = "BotWeb"                       # (sin datos de nadie)
 ARCHIVO = "actualizacion.json"
@@ -66,6 +68,8 @@ def consultar_remoto(abrir=None, timeout=TIEMPO_API):
     try:
         with (abrir or _abrir)(URL_API, timeout) as r:
             datos = json.loads(r.read(1024 * 1024).decode("utf-8"))
+        if isinstance(datos, list):
+            datos = datos[0]
         sha = str(datos["sha"]).strip().lower()
         if not _SHA.match(sha):
             return None

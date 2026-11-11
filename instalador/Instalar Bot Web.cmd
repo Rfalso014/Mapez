@@ -336,7 +336,7 @@ function Url-Api([string]$urlZip) {
     # La direccion de la API de GitHub con el ultimo cambio de esa rama (o $null si el .zip no es de GitHub).
     $m = [regex]::Match($urlZip, '^https://github\.com/([^/]+)/([^/]+)/archive/refs/heads/(.+)\.zip$')
     if (-not $m.Success) { return $null }
-    return 'https://api.github.com/repos/{0}/{1}/commits/{2}' -f $m.Groups[1].Value, $m.Groups[2].Value, $m.Groups[3].Value
+    return 'https://api.github.com/repos/{0}/{1}/commits?sha={2}&per_page=1' -f $m.Groups[1].Value, $m.Groups[2].Value, $m.Groups[3].Value
 }
 
 function Leer-Commit([string]$url) {
@@ -347,6 +347,7 @@ function Leer-Commit([string]$url) {
         $resp = $req.GetResponse()
         try { $lector = New-Object IO.StreamReader($resp.GetResponseStream(), [Text.Encoding]::UTF8); $json = $lector.ReadToEnd() } finally { $resp.Close() }
         $d = $json | ConvertFrom-Json
+        if ($d -is [array]) { $d = $d[0] }
         $sha = ("" + $d.sha).Trim().ToLower()
         if ($sha -notmatch '^[0-9a-f]{40}$') { return $null }
         $fecha = "" + $d.commit.committer.date

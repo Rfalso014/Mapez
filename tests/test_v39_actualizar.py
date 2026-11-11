@@ -131,7 +131,13 @@ class TestConsultarGitHub(SinRed):
         abrir = _Abrir({actualizar.URL_API: respuesta_api()})
         r = actualizar.consultar_remoto(abrir=abrir)
         self.assertEqual(r, {"sha": SHA_B, "mensaje": "Arreglo del calendario", "fecha": "2026-11-10T15:00:00Z"})
-        self.assertEqual(abrir.llamadas, ["https://api.github.com/repos/Rfalso014/Mapez/commits/New-tool"])
+        self.assertEqual(abrir.llamadas, ["https://api.github.com/repos/Rfalso014/Mapez/commits?sha=New-tool&per_page=1"])
+
+    def test_lee_la_lista_que_devuelve_github(self):
+        # GitHub contesta con una lista (el último cambio, sin sus archivos): así no pasa de 1 MB con cambios grandes.
+        lista = ("[" + respuesta_api().decode("utf-8") + "]").encode("utf-8")
+        r = actualizar.consultar_remoto(abrir=_Abrir({actualizar.URL_API: lista}))
+        self.assertEqual(r, {"sha": SHA_B, "mensaje": "Arreglo del calendario", "fecha": "2026-11-10T15:00:00Z"})
 
     def test_sin_conexion_o_limite_se_calla(self):
         limite = urllib.error.HTTPError(actualizar.URL_API, 403, "rate limit exceeded", {}, None)
@@ -703,7 +709,7 @@ class TestInstalador(unittest.TestCase):
             "Write-Output $Actualizando; Write-Output $NoPreguntar" % (tmp.replace("'", "''"), SHA_B),
             env={"BOTWEB_DESTINO": destino, "BOTWEB_ACTUALIZAR": "1"})
         lineas = salida.splitlines()
-        self.assertEqual(lineas[:4], ["https://api.github.com/repos/Rfalso014/Mapez/commits/New-tool", "[]", "True", "True"])
+        self.assertEqual(lineas[:4], ["https://api.github.com/repos/Rfalso014/Mapez/commits?sha=New-tool&per_page=1", "[]", "True", "True"])
         datos = actualizar.leer_instalado(tmp)
         self.assertEqual((datos["sha"], datos["fecha"], datos["mensaje"], datos["rama"]),
                          (SHA_B, "2026-11-10T15:00:00Z", "Nueva versión", "New-tool"))
