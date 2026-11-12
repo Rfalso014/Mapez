@@ -37,7 +37,8 @@ FUENTES = {"mapa": "del mapa de la página", "ejecucion": "de una ejecución", "
            "actualizar": "de «Actualizar opciones»"}
 _RX_FECHA_PLANTILLA = re.compile(r"\{(hoy|ayer|fecha|inicio_mes|fin_mes|inicio_mes_anterior|fin_mes_anterior|"
                                  r"manana|mañana|lunes|semana|dias|lunes_semana|lunes_semana_anterior|"
-                                 r"domingo_semana_anterior|inicio_anio)\b", re.IGNORECASE)
+                                 r"domingo_semana_anterior|inicio_anio|desde|hasta|inicio_quincena_anterior|"
+                                 r"fin_quincena_anterior)\b", re.IGNORECASE)
 _RX_FECHA_TEXTO = re.compile(r"fecha|date|desde|hasta|inicio|final|periodo|período|día|dia\b", re.IGNORECASE)
 _RX_FECHA_VALOR = re.compile(r"^\s*\d{1,4}[/\-.]\d{1,2}[/\-.]\d{1,4}\s*$")
 _RX_CORTE = re.compile(r"^\s*\d{1,2}\s*-\s*\d{4}\b")
@@ -293,7 +294,12 @@ def _sugerencias_fecha(valor):
             {"valor": "{inicio_mes:%s}" % fmt, "texto": "inicio del mes"},
             {"valor": "{fin_mes:%s}" % fmt, "texto": "fin del mes"},
             {"valor": "{inicio_mes_anterior:%s}" % fmt, "texto": "inicio del mes anterior"},
-            {"valor": "{fin_mes_anterior:%s}" % fmt, "texto": "fin del mes anterior"}]
+            {"valor": "{fin_mes_anterior:%s}" % fmt, "texto": "fin del mes anterior"},
+            # v3.9: quincenas y el periodo de «Repetir por meses / quincenas»
+            {"valor": "{inicio_quincena_anterior:%s}" % fmt, "texto": "inicio de la quincena anterior"},
+            {"valor": "{fin_quincena_anterior:%s}" % fmt, "texto": "fin de la quincena anterior"},
+            {"valor": "{desde:%s}" % fmt, "texto": "inicio del periodo"},
+            {"valor": "{hasta:%s}" % fmt, "texto": "fin del periodo"}]
 
 
 def datos_panel(flujo, filas_cache=None, mapas=None, novedades=None, vigilado=None, elecciones=None,
@@ -343,6 +349,8 @@ def datos_panel(flujo, filas_cache=None, mapas=None, novedades=None, vigilado=No
             valor = e.get("valor", valor_g) if e else valor_g
             seleccion = []
         actual = _texto_elegido(opciones, est, valor)
+        if not seleccion and est == "marcadas" and p.valores:      # v3.9: «las que marque»: las marcadas
+            seleccion = list(p.valores)
         if not seleccion:
             seleccion = [actual] if actual else []
         if est == "fija" and valor and valor not in opciones:

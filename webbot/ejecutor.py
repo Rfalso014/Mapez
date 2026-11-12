@@ -344,7 +344,9 @@ JS_EXPANDIDO = r"""c => { for (const e of [c].concat(Array.from(c.querySelectorA
 
 # Lista nativa (<select>) del campo: el propio elemento o la única dentro de él.
 JS_SELECT_NATIVO = r"""c => { const s = c.tagName === 'SELECT' ? c : (c.querySelectorAll('select').length === 1 ? c.querySelector('select') : null);
-  if (!s) return null; s.setAttribute('data-bot-select', '1');
+  if (!s) return null;
+  s.ownerDocument.querySelectorAll('[data-bot-select]').forEach((x) => { if (x !== s) x.removeAttribute('data-bot-select'); });
+  s.setAttribute('data-bot-select', '1');
   return Array.from(s.options).map((o) => ({ texto: (o.text || '').replace(/\s+/g, ' ').trim(), valor: o.value, desactivada: o.disabled })); }"""
 
 JS_NOMBRE_CORTO = r"""e => ((e.innerText || e.textContent || e.getAttribute('aria-label') || e.id || e.tagName) + '').replace(/\s+/g, ' ').trim().slice(0, 50)"""
@@ -701,10 +703,20 @@ class ResultadoEjecucion:
         self.extra = None         # v3.0: lo que devolvió `al_final` (opciones leídas, mapa de la página…)
         self.opciones_leidas = {}  # v3.1: {paso: {opciones, padres, firma}} listas leídas (opciones de los filtros)
         self.filtros = []          # v3.1: filtros cambiados solo para esta ejecución (texto para el registro)
+        self.periodos = []         # v3.9: [(desde, hasta)] de «Repetir por meses / quincenas» (vacío = no)
+        self.opciones_bucle = []   # v3.9: «para cada opción»: [{paso, lista, bien: [textos], fallos: [(texto, motivo)]}]
+        self.impresiones = []      # v3.9: lo que mandó a imprimir el paso «Imprimir»: [{archivo, impresora}]
 
     def resumen(self):
         if self.ok:
-            if self.dias:
+            if self.periodos:
+                from .flujo import describir_periodo
+                txt = "Terminado: %d periodo%s (%s a %s), %d pasos" % (
+                    len(self.periodos), "" if len(self.periodos) == 1 else "s", describir_periodo(*self.periodos[0]),
+                    describir_periodo(*self.periodos[-1]), self.completados)
+                if len(self.periodos) == 1:
+                    txt = "Terminado: periodo %s, %d pasos" % (describir_periodo(*self.periodos[0]), self.completados)
+            elif self.dias:
                 txt = "Terminado: %d días (%s a %s), %d pasos" % (
                     len(self.dias), self.dias[0].strftime("%d/%m/%Y"), self.dias[-1].strftime("%d/%m/%Y"), self.completados)
             else:
@@ -856,6 +868,8 @@ class Ejecutor:
         self.al_final = al_final
         self.dias = dias
         self.fecha = None
+        self.periodo = None             # v3.9: (desde, hasta) del pase en curso ({desde} y {hasta})
+        self._fallos_bucle = []         # v3.9: opciones de «para cada opción» que fallaron (se sigue con las demás)
         self._notificar = notificar
         self.reporte_id = reporte_id
         self._rechazo_previo = None
@@ -901,11 +915,18 @@ class Ejecutor:
 
     def _r(self, texto, ext=None, nombre=None):
         return plantillas.renderizar(texto, variables=self.variables, hoy=self.hoy, ext=ext, nombre=nombre,
-                                     resolver_secreto=self._secreto, fecha=self.fecha, reporte=self.flujo.nombre or "")
+                                     resolver_secreto=self._secreto, fecha=self.fecha, reporte=self.flujo.nombre or "",
+                                     **self._periodo_plantillas())
 
     def _r_log(self, texto, ext=None, nombre=None):
         return plantillas.renderizar(texto, variables=self.variables, hoy=self.hoy, ext=ext, nombre=nombre,
-                                     enmascarar_secretos=True, fecha=self.fecha, reporte=self.flujo.nombre or "")
+                                     enmascarar_secretos=True, fecha=self.fecha, reporte=self.flujo.nombre or "",
+                                     **self._periodo_plantillas())
+
+    def _periodo_plantillas(self):
+        """v3.9: {desde}, {hasta} (el periodo del pase en curso) y el día de corte de las quincenas."""
+        desde, hasta = self.periodo if self.periodo else (None, None)
+        return {"desde": desde, "hasta": hasta, "corte": mod_flujo.corte_de(self.flujo.opciones)}
 
     # ------------------------------------------------------------- utilidades
     def _comprobar_detener(self):
@@ -1131,6 +1152,10 @@ class Ejecutor:
             self._dormir(max(0.0, float(paso.segundos)))
             return
 
+        if t == "imprimir" and (paso.que_imprimir or "archivo") == "archivo":    # v3.9: no necesita la página
+            self._paso_imprimir(paso, None, timeout)
+            return
+
         pg, scope = self._alcance(paso, timeout)
 
         if t == "iniciar_sesion":
@@ -1209,6 +1234,10 @@ class Ejecutor:
 
         if t == "guardar_pagina":
             self._guardar_pagina(paso, pg, timeout)
+            return
+
+        if t == "imprimir":                 # v3.9: la página que se ve
+            self._paso_imprimir(paso, pg, timeout)
             return
 
         if t == "elegir_opcion":
@@ -3402,23 +3431,35 @@ class Ejecutor:
                     ctx.new_page()
                 ctx.set_default_timeout(int(float(self.flujo.opcion("timeout_paso") or 60) * 1000))
                 pausa = self._pausa_entre_pasos()
-                dias = [] if self.hasta is not None else self.dias_a_repetir()
-                res.dias = list(dias)
-                for n, dia in enumerate(dias or [None], 1):
-                    self.fecha = dia
-                    if dia is not None:
-                        texto = "Día %s (%d de %d)" % (dia.strftime("%d/%m/%Y"), n, len(dias))
+                # v3.9: un pase por día (Repetir por días) o por periodo (Repetir por meses / quincenas)
+                periodos = [] if self.hasta is not None else self.periodos_a_repetir()
+                por_periodos = self.dias is None and mod_flujo.es_por_periodos(self.flujo.opciones.get("repetir_dias"))
+                res.dias = [] if por_periodos else [d for d, _h in periodos]
+                res.periodos = list(periodos) if por_periodos else []
+                if por_periodos and len(periodos) > 1:
+                    self._nombres_por_periodo()
+                for n, periodo in enumerate(periodos or [None], 1):
+                    self.periodo = periodo
+                    self.fecha = periodo[0] if periodo else None
+                    if periodo is not None:
+                        if por_periodos:
+                            texto = "Periodo %s: del %s al %s (%d de %d)" % (
+                                mod_flujo.describir_periodo(*periodo), periodo[0].strftime("%d/%m/%Y"),
+                                periodo[1].strftime("%d/%m/%Y"), n, len(periodos))
+                        else:
+                            texto = "Día %s (%d de %d)" % (periodo[0].strftime("%d/%m/%Y"), n, len(periodos))
                         self._log("=== %s ===" % texto)
                         self.progreso(-1, "dia", texto)
                         self._indice_previo = self._recuperado_en = self._guardia_en = None
                         self._tras_abrir = False
-                    if not self._recorrer_pasos(res, pausa):
+                    if not self._recorrer(res, pausa):
                         return
                 if self.al_final is not None:
                     pg = self._pagina_si_existe(self._pagina_activa if self._pagina_activa >= 0 else 0) or \
                         self._pagina_si_existe(0)
                     res.extra = self.al_final(self, pg)
                 res.ok = True
+                self._cerrar_bucles(res)
             finally:
                 self._pw = self._ctx = None
                 try:
@@ -3432,11 +3473,22 @@ class Ejecutor:
             return list(self.dias)
         return mod_flujo.dias_a_repetir(self.flujo.opciones.get("repetir_dias"), self.hoy)
 
-    def _recorrer_pasos(self, res, pausa):
-        """Ejecuta los pasos (hasta `self.hasta` si se indicó).  False si un paso obligatorio falló."""
+    def periodos_a_repetir(self):
+        """v3.9: los pases (desde, hasta): los días de `dias` si se dieron, o los de «Repetir…» del flujo; [] = uno."""
+        if self.dias is not None:
+            return [(d, d) for d in self.dias]
+        return mod_flujo.periodos_a_repetir(self.flujo.opciones.get("repetir_dias"), self.hoy)
+
+    def _recorrer_pasos(self, res, pausa, primero=0, tope=None):
+        """Ejecuta los pasos (hasta `self.hasta` si se indicó).  False si un paso obligatorio falló.  v3.9: `primero` y
+        `tope` (índices, tope exclusivo) = solo ese tramo de pasos («para cada opción»)."""
         from playwright.sync_api import Error as ErrorPW
         ejecutados = 0
         for i, paso in enumerate(self.flujo.pasos, 1):
+            if i - 1 < primero:
+                continue
+            if tope is not None and i - 1 >= tope:
+                break
             if self.hasta is not None and i - 1 >= self.hasta:
                 break
             self._comprobar_detener()
@@ -3521,3 +3573,184 @@ class Ejecutor:
             dlg.accept()
         except Exception:
             pass
+
+    # ------------------------------------------------- v3.9: «para cada opción», periodos e «Imprimir»
+    def _recorrer(self, res, pausa):
+        """Un pase completo del reporte, con «para cada opción» si lo tiene (no al leer o mapear la página: `hasta`)."""
+        if self.hasta is not None:
+            return self._recorrer_pasos(res, pausa)
+        return self._recorrer_con_opciones(res, pausa, 0, len(self.flujo.pasos))
+
+    def _recorrer_con_opciones(self, res, pausa, inicio, fin):
+        """Los pasos [inicio, fin): los de un «Elegir opción» con «todas» / «las que marque» se repiten con cada opción
+        hasta su «Aquí termina…» (o el final).  Se pueden anidar (cada sucursal × cada tabla)."""
+        pasos = self.flujo.pasos
+        k = next((j for j in range(inicio, fin) if mod_flujo.es_bucle(pasos[j])), None)
+        if k is None:
+            return self._recorrer_pasos(res, pausa, inicio, fin)
+        if not self._recorrer_pasos(res, pausa, inicio, k):
+            return False
+        cuerpo = min(mod_flujo.fin_del_bucle(pasos, k), fin)
+        if not self._bucle_de_opciones(res, pausa, k, cuerpo):
+            return False
+        return self._recorrer_con_opciones(res, pausa, cuerpo, fin)
+
+    def _bucle_de_opciones(self, res, pausa, k, cuerpo):
+        """El paso `k` («para cada opción») y los pasos (k, cuerpo) una vez por opción.  Si una opción falla se apunta y
+        se sigue con la siguiente; False solo si fallan todas."""
+        original = self.flujo.pasos[k]
+        que = original.nombre_objetivo() or "la lista"
+        primera = None
+        if original.estrategia == "cada_una":
+            # primera vuelta: el paso tal cual (elige la primera opción de verdad) y así se lee la lista entera
+            res.opciones_leidas.pop(k, None)
+            ok = self._recorrer_pasos(res, pausa, k, k + 1)
+            leidas = (res.opciones_leidas.get(k) or {}).get("opciones")
+            if leidas is None:
+                return False
+            objetivos = mod_flujo.opciones_del_bucle(original, leidas)
+            if ok:
+                primera = mod_flujo._normal(self._elegidas.get(k) or "")
+            elif objetivos:
+                self._log("    (no se pudo elegir la primera opción: se prueban una a una)")
+                res.paso_fallido, res.error = None, ""
+        else:
+            objetivos = mod_flujo.opciones_del_bucle(original)
+        if not objetivos:
+            res.paso_fallido = k + 1
+            if not res.error:                   # (si el paso ya falló, su error ya está en el registro)
+                res.error = "La lista %s no tiene opciones que recorrer" % que
+                self._log("    ERROR: %s" % res.error)
+                self.progreso(k, "error", res.error)
+            return False
+        total = len(objetivos)
+        self._log("    Para cada opción de %s: %s: %s" % (
+            que, "1 opción" if total == 1 else "%d opciones" % total,
+            ", ".join("«%s»" % self._limpiar(t[:40]) for t in objetivos[:10]) + (" …" if total > 10 else "")))
+        bien, fallos = [], []
+        for n, texto in enumerate(objetivos, 1):
+            self._comprobar_detener()
+            aviso = "Opción «%s» de %s (%d de %d)" % (self._limpiar(texto[:60]), que, n, total)
+            self._log("=== %s ===" % aviso)
+            self.progreso(-1, "dia", aviso)
+            if n == 1 and primera == texto:
+                ok = True                                   # ya se eligió en la primera vuelta
+            else:
+                ok = self._con_paso(k, self._paso_fijo(original, texto),
+                                    lambda: self._recorrer_pasos(res, pausa, k, k + 1))
+            if ok:
+                ok = self._con_sufijo(k, cuerpo, texto, lambda: self._recorrer_con_opciones(res, pausa, k + 1, cuerpo))
+            if ok:
+                bien.append(texto)
+                continue
+            motivo = "paso %s: %s" % (res.paso_fallido, res.error or "error")
+            fallos.append((texto, motivo))
+            self._log("    La opción «%s» falló (%s). Se sigue con la siguiente." % (self._limpiar(texto[:60]), motivo))
+            res.paso_fallido, res.error = None, ""
+            self._indice_previo = self._recuperado_en = self._guardia_en = None
+        res.opciones_bucle.append({"paso": k + 1, "lista": que, "bien": bien, "fallos": fallos})
+        if not bien:
+            res.paso_fallido = k + 1
+            res.error = "Fallaron todas las opciones de %s: %s" % (
+                que, "; ".join("«%s»: %s" % (t[:40], m) for t, m in fallos[:3]))
+            return False
+        if fallos:
+            cuando = (" en %s" % mod_flujo.describir_periodo(*self.periodo)) if self.periodo and res.periodos else ""
+            self._fallos_bucle += [(k + 1, que, "«%s»%s" % (t[:60], cuando), m) for t, m in fallos]
+        self._log("    Para cada opción de %s: %d de %d bien" % (que, len(bien), total))
+        return True
+
+    @staticmethod
+    def _paso_fijo(original, texto):
+        """Copia del paso «para cada opción» que elige exactamente esa opción."""
+        p = original.copia()
+        p.estrategia, p.valor, p.valores = "fija", plantillas.escapar(texto), []
+        return p
+
+    def _con_paso(self, k, paso, hacer):
+        """Ejecuta `hacer()` con el paso `k` cambiado por `paso` (y lo deja como estaba)."""
+        antes = self.flujo.pasos[k]
+        self.flujo.pasos[k] = paso
+        try:
+            return hacer()
+        finally:
+            self.flujo.pasos[k] = antes
+
+    def _con_sufijo(self, k, cuerpo, texto, hacer):
+        """Ejecuta `hacer()` con « - <opción>» en el nombre de los archivos que se guardan dentro de la repetición, si el
+        nombre no distingue ya la opción ({opcion} o {nombre del filtro}): así no se pisan."""
+        cambios = []
+        for j in range(k + 1, cuerpo):
+            p = self.flujo.pasos[j]
+            if p.tipo not in mod_flujo.TIPOS_QUE_GUARDAN or p.desactivado:
+                continue
+            base = p.nombre or ("{nombre}{ext}" if p.tipo == "descargar" else "Pagina_{hoy:%Y-%m-%d}")
+            if self._nombre_distingue_opcion(base, k, j):
+                continue
+            limpio = re.sub(r'[<>:"/\\|?*\x00-\x1f]+', "_", texto).strip(" .")[:80]
+            extra = plantillas.escapar(" - " + limpio)
+            cambios.append((p, p.nombre))
+            p.nombre = base.replace("{ext}", extra + "{ext}", 1) if "{ext}" in base else base + extra
+        try:
+            return hacer()
+        finally:
+            for p, antes in cambios:
+                p.nombre = antes
+
+    def _nombre_distingue_opcion(self, base, k, j):
+        original = self.flujo.pasos[k]
+        filtro = (original.filtro or "").strip()
+        if filtro and filtro not in plantillas.RESERVADAS and "{%s}" % filtro in base:
+            return True
+        if re.search(r"\{opcion\}", base):          # {opcion} = la ÚLTIMA opción elegida: la de este paso si no hay otra
+            return not any(self.flujo.pasos[x].tipo == "elegir_opcion" and not self.flujo.pasos[x].desactivado
+                           for x in range(k + 1, j))
+        return False
+
+    def _cerrar_bucles(self, res):
+        """Al terminar: si alguna opción de «para cada opción» falló, el reporte queda como fallido (con lo que falló)
+        aunque las demás opciones se descargaran."""
+        if not self._fallos_bucle:
+            return
+        n = len(self._fallos_bucle)
+        detalle = "; ".join("%s: %s" % (t, m) for _k, _q, t, m in self._fallos_bucle[:3]) + (" …" if n > 3 else "")
+        res.ok = False
+        res.paso_fallido = self._fallos_bucle[0][0]
+        res.error = self._limpiar("En %s %s (las demás opciones se descargaron bien): %s" % (
+            self._fallos_bucle[0][1], "falló 1 opción" if n == 1 else "fallaron %d opciones" % n, detalle))
+        self._log("AVISO: %s" % res.error)
+
+    def _nombres_por_periodo(self):
+        """Repetir por meses / quincenas: los archivos llevan el periodo en el nombre (si no lo llevan ya), para que el
+        de cada mes o quincena no pise al anterior.  Se cambia una copia: el reporte guardado no cambia."""
+        self.flujo = self.flujo.copia()
+        for i, p in enumerate(self.flujo.pasos):
+            if p.tipo not in mod_flujo.TIPOS_QUE_GUARDAN or p.desactivado:
+                continue
+            nuevo = mod_flujo.nombre_con_periodo(p.nombre, p.tipo)
+            if nuevo != p.nombre:
+                self._log("(paso %d: el nombre del archivo lleva el periodo para que no se pisen: «%s»)" % (i + 1, nuevo))
+                p.nombre = nuevo
+
+    def _paso_imprimir(self, paso, pg, timeout):
+        """Paso «Imprimir»: el último archivo descargado o (que_imprimir = pagina) la página, guardada antes como PDF en
+        «registros\\impresiones», en la impresora del paso o en la predeterminada de Windows."""
+        from . import impresion
+        impresora = self._r(paso.impresora).strip() if paso.impresora else ""
+        if (paso.que_imprimir or "archivo") == "pagina":
+            carpeta = os.path.join(self.carpeta_registros, "impresiones")
+            os.makedirs(carpeta, exist_ok=True)
+            nombre = nombre_archivo_seguro("%s %s.pdf" % (self.flujo.nombre or "Pagina",
+                                                           datetime.datetime.now().strftime("%Y-%m-%d_%H%M%S")))
+            ruta = self._guardar_pdf(pg, ruta_libre(os.path.join(carpeta, nombre)))
+            self._log("    página guardada para imprimir: %s" % ruta)
+        else:
+            if not self.resultado.archivos:
+                raise ErrorPaso("Todavía no se ha descargado ningún archivo que imprimir: pon el paso «Imprimir» después "
+                                "del paso «Descargar»")
+            ruta = self.resultado.archivos[-1]
+        try:
+            usada = impresion.imprimir_archivo(ruta, impresora, log=lambda t: self._log("    " + t))
+        except impresion.ErrorImpresion as e:
+            raise ErrorPaso(str(e)) from None
+        self.resultado.impresiones.append({"archivo": ruta, "impresora": usada})

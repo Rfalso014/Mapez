@@ -163,7 +163,10 @@ class Aplicacion:
         self.al_iniciar = []                        # acciones pedidas por la línea de comandos (--ejecutar)
         self.abrir_en_sistema = abrir_en_sistema    # v3.2: «Abrir carpeta» / «Abrir archivo» (las pruebas lo cambian)
         self.abrir_dialogo = abrir_dialogo          # v3.5: «📁 Elegir…» (None = el explorador de Windows; pruebas: falso)
-        # v3.5: caché de la lista de tareas de Windows (schtasks /Query tarda ~1 s y se pedía en cada carga del Inicio,
+        # v3.9: «Imprimir» un archivo descargado y la lista de impresoras (las pruebas los cambian: nunca se imprime)
+        from . import impresion as mod_impresion
+        self.imprimir_archivo = mod_impresion.imprimir_archivo
+        self.listar_impresoras = mod_impresion.impresoras        # v3.5: caché de la lista de tareas de Windows (schtasks /Query tarda ~1 s y se pedía en cada carga del Inicio,
         # de Vigilancia y de Correo).  Se vacía al crear/borrar una tarea desde el bot.  Con `tareas_en_segundo_plano`
         # (lo pone `abrir_aplicacion`), pasado el plazo se devuelve la lista anterior y se relee en otro hilo.
         self._tareas_cache = None                   # (momento, lista)
@@ -536,7 +539,12 @@ class Aplicacion:
         return {"plantillas": plantillas.AYUDA_PLANTILLAS, "estrategias": mod_flujo.NOMBRES_ESTRATEGIA,
                 "tipos": mod_flujo.NOMBRES_TIPO, "modos_dias": mod_flujo.MODOS_DIAS,
                 "opciones_defecto": mod_flujo.OPCIONES_DEFECTO, "formatos": list(mod_flujo.FORMATOS_PAGINA),
-                "botones": list(mod_flujo.BOTONES)}
+                "botones": list(mod_flujo.BOTONES),
+                # v3.9: repetir por meses / quincenas, «Imprimir» y «Al terminar, ejecutar…»
+                "modos_periodo": mod_flujo.MODOS_PERIODO, "rangos_periodo": mod_flujo.RANGOS_PERIODO,
+                "mitades": mod_flujo.MITADES, "corte_quincena": plantillas.CORTE_QUINCENA,
+                "que_imprimir": mod_flujo.QUE_IMPRIMIR, "cuando_encadenar": mod_flujo.CUANDO_ENCADENAR,
+                "estrategias_bucle": list(mod_flujo.ESTRATEGIAS_BUCLE)}
 
     def _api_detener(self, metodo, partes, datos, q):
         return self.detener()
@@ -1068,13 +1076,35 @@ class Aplicacion:
         return self.lanzar("actualizar_filtros", "Actualizar las opciones de «%s»" % fl.nombre, trabajo)
 
     def _guardar_flujo(self, fl, rid):
-        problemas = [p for p in fl.problemas() if "Repetir por días" in p]
+        problemas = [p for p in fl.problemas() if "Repetir por días" in p or p.startswith(("Repetir por", "Al terminar"))]
         if problemas:
             raise ErrorApi(problemas[0])
+        self._comprobar_cadena(fl, rid)
         try:
             return self.almacen.guardar(fl, rid)
         except ErrorAlmacen as e:
             raise ErrorApi(str(e))
+
+    def _comprobar_cadena(self, fl, rid):
+        """v3.9: «Al terminar, ejecutar…»: los reportes existen, no es él mismo y no se forma un círculo (A → B → A)."""
+        from . import lote
+        conf = mod_flujo.validar_al_terminar(fl.opciones.get("al_terminar"))
+        if not conf:
+            return
+        for sig in conf["reportes"]:
+            if rid is not None and sig == int(rid):
+                raise ErrorApi("Al terminar: un reporte no puede ejecutarse a sí mismo después")
+            if self.almacen.obtener(sig) is None:
+                raise ErrorApi("Al terminar: no existe el reporte número %d" % sig)
+        if rid is None:
+            return
+        circulo = lote.buscar_circulo(int(rid), conf["reportes"],
+                                      lambda x: lote.siguientes_guardados(self.almacen, x))
+        if circulo:
+            nombres = [fl.nombre if x == int(rid) else (self.almacen.obtener(x) or {}).get("nombre", "reporte %d" % x)
+                       for x in circulo]
+            raise ErrorApi("Al terminar: se formaría un círculo (%s): así no pararía nunca. Quita alguno."
+                           % " → ".join("«%s»" % n for n in nombres))
 
     def _api_papelera(self, metodo, partes, datos, q):
         if not partes:
@@ -1100,12 +1130,19 @@ class Aplicacion:
             cambios = mod_flujo.usar_nombre_del_reporte(fl, solo_de_la_web=datos.get("solo_de_la_web") is not False)
             return {"flujo": fl.a_dict(), "cambios": [{"paso": i, "antes": a, "despues": d} for i, a, d in cambios],
                     "pasos": [_paso_dict(p, i) for i, p in enumerate(fl.pasos)]}
+        if accion == "usar_periodo":               # v3.9: {desde} y {hasta} en los campos de fecha
+            try:
+                mensajes = mod_flujo.usar_periodo_en_fechas(fl)
+            except ErrorFlujo as e:
+                raise ErrorApi(str(e))
+            return {"flujo": fl.a_dict(), "mensajes": mensajes, "pasos": [_paso_dict(p, i) for i, p in enumerate(fl.pasos)]}
         if accion == "describir":
             return {"pasos": [_paso_dict(p, i) for i, p in enumerate(fl.pasos)], "problemas": fl.problemas(),
                     "pares": mod_flujo.pares_lista_opcion(fl.pasos), "flujo": fl.a_dict(),
                     "nombres_web": mod_flujo.pasos_con_nombre_de_la_web(fl),
                     "dias": [d.isoformat() for d in mod_flujo.dias_a_repetir(fl.opciones.get("repetir_dias"), self.hoy)]
-                    if not [p for p in fl.problemas() if "Repetir" in p] else []}
+                    if not [p for p in fl.problemas() if "Repetir" in p] else [],
+                    "periodos": self._periodos_vista(fl)}
         if accion == "paso":
             try:
                 p = Paso.desde_dict(datos.get("paso"))
@@ -1113,6 +1150,20 @@ class Aplicacion:
                 raise ErrorApi("El paso no es válido: %s" % e)
             return {"paso": _paso_dict(p)}
         raise ErrorApi("Acción no válida", 404)
+
+    def _periodos_vista(self, fl):
+        """v3.9: los periodos de «Repetir por meses / quincenas» para la vista previa: [{desde, hasta, texto}]."""
+        conf = fl.opciones.get("repetir_dias")
+        if not mod_flujo.es_por_periodos(conf):
+            return []
+        try:
+            lista = mod_flujo.periodos_a_repetir(conf, self.hoy)
+        except ErrorFlujo:
+            return []
+        hoy = self.hoy or datetime.date.today()
+        hoy = hoy.date() if isinstance(hoy, datetime.datetime) else hoy
+        return [{"desde": d.isoformat(), "hasta": h.isoformat(), "texto": mod_flujo.describir_periodo(d, h),
+                 "sin_terminar": h >= hoy} for d, h in lista]
 
     def _api_plantilla(self, metodo, partes, datos, q):
         texto = datos.get("texto") or ""
@@ -1222,8 +1273,32 @@ class Aplicacion:
                     pass
             self.eventos.emitir("resultado", trabajo=t.id, reporte_id=rid, ok=res.ok, resumen=res.resumen(),
                                 registro=res.ruta_log, captura=res.ruta_captura, archivos=res.archivos)
-            return res.ok, res.resumen()
+            if res.detenido or t.detener.is_set():
+                return res.ok, res.resumen()
+            cadena = self._ejecutar_cadena(t, fl, rid, res.ok, ver, lento, variables)      # v3.9: «Al terminar…»
+            if cadena is None:
+                return res.ok, res.resumen()
+            return res.ok and cadena.ok, res.resumen() + "\n" + cadena.resumen()
         return self.lanzar("ejecutar", "Ejecutar «%s»" % fl.nombre, trabajo, reporte_id=rid)
+
+    def _ejecutar_cadena(self, t, fl, rid, ok, ver, lento, variables):
+        """v3.9: los reportes de «Al terminar, ejecutar…» tras una ejecución suelta (en el mismo trabajo)."""
+        from . import lote
+        if rid is None or not mod_flujo.reportes_siguientes(fl, ok):
+            return None
+        ajustes = self.almacen.ajustes()
+        v = ajustes.get("ver_mientras_trabaja", True) if ver is None else ver
+
+        def fabrica(flujo_n, **kw):              # (el mismo ejecutor que «Ejecutar»: su perfil, avisos y progreso)
+            return self.crear_ejecutor(t, flujo_n, kw.get("reporte_id"), ver=ver, lento=lento, variables=variables)
+        return lote.ejecutar_encadenados(
+            fl, rid, ok, log=self._log, carpeta_perfiles=self.carpeta_perfiles, carpeta_registros=self.carpeta_registros,
+            carpeta_descargas=self.carpeta_descargas, oculto=self._oculto(v), lento=lento, variables=variables,
+            detener=t.detener, almacen=self.almacen, pedir_acceso=self._pedir_acceso(t), hoy=self.hoy,
+            fabrica_ejecutor=fabrica,
+            aviso_lote=lambda n, total, item, fase: self.eventos.emitir(
+                "lote", n=n, total=total, nombre=item.nombre, fase=fase, estado=item.estado, trabajo=t.id,
+                reporte_id=item.ruta if isinstance(item.ruta, int) else None))
 
     def _lanzar_lote(self, ids, ver, lento, variables):
         from . import lote
@@ -1888,7 +1963,13 @@ class Aplicacion:
             return self._programar_con_horario(tarea, datos["programacion"], datos, {"ids": [rid]}, clave=clave,
                                                sustituir=[_corto((g or {}).get("tarea", ""))])
         if metodo == "GET" and not vigilar:                  # v3.4: lo guardado, para rellenar la ventana
-            return self._vista_programacion(clave, tarea)
+            vista = self._vista_programacion(clave, tarea)
+            try:                                             # v3.9: el horario de «Repetir por meses / quincenas»
+                vista["sugerida"] = horario.programacion_de_periodo(
+                    self.almacen.cargar_flujo(rid).opciones.get("repetir_dias"))
+            except (ErrorAlmacen, horario.ErrorHorario):
+                vista["sugerida"] = None
+            return vista
         frecuencia = (datos.get("frecuencia") or "DIARIA").upper()
         try:
             cmd = programador.construir_comando_crear(
@@ -2784,7 +2865,22 @@ class Aplicacion:
                 raise ErrorApi("Por seguridad, ese tipo de archivo no se abre desde aquí: usa «Abrir carpeta»")
             self.abrir_en_sistema(ruta, carpeta=False)
             return {"ok": True}
+        if accion == "imprimir":                    # v3.9: «Imprimir» un archivo descargado
+            from . import impresion as mod_impresion
+            if not os.path.isfile(ruta):
+                raise ErrorApi("Ya no existe: %s" % ruta, 404)
+            if os.path.splitext(ruta)[1].lower() not in mod_impresion.EXTENSIONES_IMPRIMIR:
+                raise ErrorApi("Ese tipo de archivo no se puede imprimir desde aquí: ábrelo e imprímelo desde su programa")
+            try:
+                usada = self.imprimir_archivo(ruta, str(datos.get("impresora") or ""), log=self._log)
+            except mod_impresion.ErrorImpresion as e:
+                raise ErrorApi(str(e))
+            return {"ok": True, "impresora": usada, "archivo": os.path.basename(ruta)}
         raise ErrorApi("Acción no válida", 404)
+
+    def _api_impresoras(self, metodo, partes, datos, q):
+        """v3.9: GET impresoras → {impresoras: [nombres], predeterminada} (para el paso «Imprimir»)."""
+        return self.listar_impresoras()
 
     # --------------------------------------------------------------- accesos
     def _sitios(self):

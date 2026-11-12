@@ -618,3 +618,42 @@ def vista(prog, n=5, ahora=None, vacio="solo a mano"):
                          for c in proximas(p, n, ahora)],
             "avisos": avisos(p), "disparadores": n_disparadores(p), "ejecucion": ejecucion(p),
             "ejecucion_texto": describir_ejecucion(ejecucion(p))}
+
+
+# v3.9: el horario que corresponde a «Repetir por meses / quincenas»: el reporte se ejecuta justo cuando termina un
+# periodo (con «solo el que acaba de terminar» baja ese periodo).  Mes: el día 1.  Quincena (corte N): el día 1 (acaba de
+# terminar la 2.ª del mes anterior) y el día N (acaba de terminar la 1.ª); solo la 1.ª → el día N; solo la 2.ª → el 1.
+def regla_periodo(modo, corte=15, mitades="ambas", horas=None):
+    """La regla «mensual» (días del mes) para programar un reporte por meses o por quincenas."""
+    corte = int(corte or 15)
+    if not 2 <= corte <= 28:
+        raise ErrorHorario("El día de corte de la quincena debe estar entre 2 y 28")
+    if modo == "meses":
+        dias = [1]
+    elif modo == "quincenas":
+        dias = {"ambas": [1, corte], "primera": [corte], "segunda": [1]}.get(mitades or "ambas")
+        if dias is None:
+            raise ErrorHorario("Qué quincenas no válido: %s" % mitades)
+    else:
+        raise ErrorHorario("Solo hay horario de periodo para «por meses» o «por quincenas»")
+    return _regla({"tipo": "mensual", "dias_mes": dias, "horas": horas or ["07:00"], "meses": list(range(1, 13))})
+
+
+def programacion_de_periodo(conf, horas=None):
+    """La programación sugerida para un reporte con «Repetir por meses / quincenas» (`conf` = su opción repetir_dias), o
+    None si no se repite por periodos.  Lleva «texto» con la explicación para la interfaz."""
+    if not isinstance(conf, dict) or conf.get("modo") not in ("meses", "quincenas"):
+        return None
+    try:
+        r = regla_periodo(conf["modo"], conf.get("corte") or 15, conf.get("mitades") or "ambas", horas)
+    except ErrorHorario:
+        return None
+    p = normalizar({"reglas": [r], "inicio": "", "fin": ""})
+    dias = lista_y(["el día %d" % d for d in r["dias_mes"]])
+    que = "mes" if conf["modo"] == "meses" else "quincena"
+    p["texto"] = ("Cada mes, %s a las %s: así se baja el %s que acaba de terminar%s." % (
+        dias, ", ".join(r["horas"]), que,
+        "" if (conf.get("rango") or "fijo") == "anterior" else
+        " (para eso, en «Repetir» elige «solo el que acaba de terminar»; con «entre dos fechas» se bajaría todo el rango "
+        "cada vez)"))
+    return p

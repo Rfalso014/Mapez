@@ -146,7 +146,7 @@ class TestAnalizarFecha(unittest.TestCase):
         self.assertEqual(ejemplos[:4], ["28/10/2026", "2026-10-28", "28-10-2026", "10/28/2026"])
         self.assertEqual(plantillas.FORMATOS_FECHA[0][0], plantillas.FORMATO_FECHA)
         for que, _n in plantillas.RELATIVAS:
-            self.assertTrue(que in plantillas.FECHAS or que in ("dias", "fecha"), que)
+            self.assertTrue(que in plantillas.FECHAS or que in ("dias", "fecha", "desde", "hasta"), que)   # v3.9: periodo
 
     def test_la_interfaz_tiene_las_mismas_listas(self):
         with open(os.path.join(RAIZ, "ui", "app.js"), encoding="utf-8") as f:

@@ -20,6 +20,7 @@ TIPOS = (
     "abrir_url", "clic", "escribir", "tecla", "seleccionar", "marcar",
     "esperar_elemento", "esperar_texto", "esperar_segundos", "descargar", "guardar_pagina",
     "pasar_raton", "iniciar_sesion", "elegir_opcion",
+    "imprimir",            # v3.9: imprime el último archivo descargado (o la página) en una impresora de Windows
 )
 
 NOMBRES_TIPO = {
@@ -37,10 +38,11 @@ NOMBRES_TIPO = {
     "pasar_raton": "Pasar el ratón",
     "iniciar_sesion": "Iniciar sesión",
     "elegir_opcion": "Elegir opción",
+    "imprimir": "Imprimir",
 }
 
 # elegir_opcion: cómo se elige la opción de una lista (nativa o propia: Vuetify, combobox…)
-ESTRATEGIAS = ("fija", "mas_reciente", "primera", "ultima", "contiene", "por_fecha")
+ESTRATEGIAS = ("fija", "mas_reciente", "primera", "ultima", "contiene", "por_fecha", "cada_una", "marcadas")
 NOMBRES_ESTRATEGIA = {
     "fija": "la opción con este texto exacto",
     "mas_reciente": "la más reciente (número o fecha más alta)",
@@ -48,7 +50,13 @@ NOMBRES_ESTRATEGIA = {
     "ultima": "la última de la lista",
     "contiene": "la primera que contiene este texto (o expresión regular)",
     "por_fecha": "la de una fecha (hoy, ayer o un día exacto)",
+    # v3.9: «para cada opción»: los pasos que siguen se repiten con cada opción (un archivo por opción)
+    "cada_una": "todas, una tras otra (un archivo por cada opción)",
+    "marcadas": "las que marque, una tras otra (un archivo por cada opción)",
 }
+ESTRATEGIAS_BUCLE = ("cada_una", "marcadas")
+# v3.9: paso «Imprimir»: qué se imprime
+QUE_IMPRIMIR = {"archivo": "el último archivo descargado", "pagina": "la página que se ve en ese momento"}
 # v3.8: lo que `Paso.problemas` dice de un paso sin valor.  No impide ejecutar el reporte: ese paso se salta.
 PROBLEMAS_SIN_VALOR = ("Falta el texto de la opción", "Falta la fecha de la opción")
 
@@ -71,6 +79,8 @@ OPCIONES_DEFECTO = {
     "recuperacion_automatica": True,  # si un elemento de un menú no se ve, intentar abrir el menú (ratón encima, reabrir lista)
     "esperar_carga": True,          # tras cada acción, esperar a que la página termine de cargar (indicadores, peticiones)
     "repetir_dias": None,           # v3.0: {modo: fijo|ultimos|mes_hasta_ayer|ayer, desde, hasta, n}: un pase por día ({fecha})
+                                    # v3.9: también {modo: meses|quincenas, rango: fijo|anterior, desde, hasta, corte,
+                                    # mitades: ambas|primera|segunda}: un pase por periodo ({desde} y {hasta})
 }
 
 MODOS_DIAS = {
@@ -79,6 +89,14 @@ MODOS_DIAS = {
     "mes_hasta_ayer": "desde el inicio del mes hasta ayer",
     "ayer": "solo ayer",
 }
+# v3.9: «Repetir por meses / por quincenas» (en la misma opción `repetir_dias`, para que los reportes de antes sigan igual)
+MODOS_PERIODO = {"meses": "por meses", "quincenas": "por quincenas"}
+RANGOS_PERIODO = {
+    "fijo": "entre dos fechas (ponerse al día: un archivo por periodo)",
+    "anterior": "solo el que acaba de terminar (para programarlo)",
+}
+MITADES = {"ambas": "las dos quincenas", "primera": "solo la primera", "segunda": "solo la segunda"}
+MAX_PERIODOS = 120
 
 _ROLES = {"button": "botón", "link": "enlace", "menuitem": "opción de menú", "tab": "pestaña",
           "option": "opción", "checkbox": "casilla", "textbox": "campo", "combobox": "lista"}
@@ -163,6 +181,10 @@ class Paso:
     enviar: dict = field(default_factory=dict)   # iniciar_sesion: {selectores, objetivo} o {tecla: "Enter"}
     estrategia: str = ""           # elegir_opcion: fija (defecto) | mas_reciente | primera | ultima | contiene | por_fecha
     filtro: str = ""               # v3.1: nombre del filtro para el usuario («Elegir corte»; panel «Usar filtros»)
+    valores: list = field(default_factory=list)  # v3.9: elegir_opcion «marcadas»: los textos de las opciones elegidas
+    fin_bucle: bool = False        # v3.9: aquí termina «para cada opción» (lo que va después se hace una sola vez)
+    que_imprimir: str = ""         # v3.9: imprimir: archivo (defecto: el último descargado) | pagina
+    impresora: str = ""            # v3.9: imprimir: nombre de la impresora (vacío = la predeterminada de Windows)
 
     # --- serialización ---------------------------------------------------
     def a_dict(self):
@@ -194,6 +216,9 @@ class Paso:
             sels = c.get("selectores")
             c["selectores"] = [sels] if isinstance(sels, str) else list(sels or [])
         paso.enviar = dict(paso.enviar) if isinstance(paso.enviar, dict) else {}
+        vals = paso.valores
+        paso.valores = [vals] if isinstance(vals, str) else [str(v) for v in (vals or []) if str(v).strip()]
+        paso.fin_bucle = bool(paso.fin_bucle)
         if paso.esperar_carga is not None:
             paso.esperar_carga = bool(paso.esperar_carga)
         return paso
@@ -318,6 +343,11 @@ class Paso:
                 que = "«%s»" % _mostrar_valor(self.valor)
             elif est == "contiene":
                 que = "la opción que contiene «%s»" % _mostrar_valor(self.valor)
+            elif est == "cada_una":
+                que = "cada opción, una tras otra (un archivo por opción)"
+            elif est == "marcadas":
+                vals = ", ".join("«%s»" % v for v in self.valores[:4]) + (" …" if len(self.valores) > 4 else "")
+                que = "una tras otra las opciones %s" % (vals or "(ninguna marcada)")
             elif est == "por_fecha":
                 que = "la opción de la fecha «%s»" % plantillas.describir_fecha(self.valor)
             else:
@@ -343,6 +373,10 @@ class Paso:
             nombre = self.nombre or "Pagina_{hoy:%Y-%m-%d}"
             donde = (" en " + self.carpeta) if self.carpeta else ""
             return "%s → «%s»%s" % ((self.formato or "html").upper(), nombre, donde)
+        if t == "imprimir":
+            que = QUE_IMPRIMIR.get(self.que_imprimir or "archivo", self.que_imprimir)
+            return "%s en %s" % (que, ("la impresora «%s»" % self.impresora) if self.impresora
+                                 else "la impresora predeterminada")
         return ""
 
     def descripcion(self):
@@ -369,10 +403,14 @@ class Paso:
             txt = "Descargar: %s" % det
         elif t == "guardar_pagina":
             txt = "Guardar la página como %s" % det
+        elif t == "imprimir":
+            txt = "Imprimir %s" % det
         else:
             txt = "%s %s" % (self.accion(), det)
         if self.pagina:
             txt += " (pestaña %d)" % (self.pagina + 1)
+        if self.fin_bucle:
+            txt += " [aquí termina «para cada opción»]"
         if self.desactivado:
             txt += " [desactivado]"
         return txt
@@ -396,6 +434,13 @@ class Paso:
                 p.append("Falta el texto de la opción")
             elif est == "por_fecha" and not (self.valor or "").strip():
                 p.append("Falta la fecha de la opción")
+            elif est == "marcadas" and not self.valores:
+                p.append("Marca al menos una opción de la lista")
+        if t == "imprimir":
+            if (self.que_imprimir or "archivo") not in QUE_IMPRIMIR:
+                p.append("Qué imprimir no válido: %s (usa archivo o pagina)" % self.que_imprimir)
+            if any(c in (self.impresora or "") for c in '"\r\n'):
+                p.append("El nombre de la impresora no puede llevar comillas ni saltos de línea")
         if t == "tecla" and not self.tecla:
             p.append("Falta la tecla")
         if t == "esperar_texto" and not self.texto:
@@ -512,10 +557,16 @@ class Flujo:
                 if pr in PROBLEMAS_SIN_VALOR:       # v3.8: se salta al ejecutar, no es un error del reporte
                     continue
                 res.append("Paso %d (%s): %s" % (i, p.accion(), pr))
+        conf = self.opciones.get("repetir_dias")
         try:
-            validar_repetir_dias(self.opciones.get("repetir_dias"))
+            validar_repetir_dias(conf)
         except ErrorFlujo as e:
-            res.append("Repetir por días: %s" % e)
+            modo = conf.get("modo") if isinstance(conf, dict) else ""
+            res.append("Repetir %s: %s" % (MODOS_PERIODO.get(modo, "por días"), e))
+        try:
+            validar_al_terminar(self.opciones.get("al_terminar"))
+        except ErrorFlujo as e:
+            res.append("Al terminar: %s" % e)
         return res
 
     def variables_necesarias(self):
@@ -1083,7 +1134,7 @@ def elegir_indice(textos, estrategia="fija", valor=""):
     if not validos:
         return None
     est = estrategia or "fija"
-    v = _normal(valor)
+    v = _normal(valor) if not isinstance(valor, (list, tuple)) else ""
     if est == "fija":
         return next((i for i in validos if textos[i].lower() == v.lower()), None)
     if est == "primera":
@@ -1110,7 +1161,47 @@ def elegir_indice(textos, estrategia="fija", valor=""):
             if mejor is None or clave_reciente(textos[i]) > clave_reciente(textos[mejor]):
                 mejor = i
         return mejor
+    if est == "cada_una":          # v3.9: la primera de verdad (sin «Seleccione…»); las demás las recorre el ejecutor
+        return next((i for i in validos if not es_marcador_de_lista(textos[i])), None)
+    if est == "marcadas":          # v3.9: la primera marcada que esté en la lista (`valor`: lista de textos o un texto)
+        marcadas = [_normal(x).lower() for x in (valor if isinstance(valor, (list, tuple)) else [valor]) if _normal(x)]
+        return next((i for i in validos if textos[i].lower() in marcadas), None)
     raise ErrorFlujo("Estrategia no válida: %s" % est)
+
+
+# --- v3.9: «para cada opción» (elegir_opcion con estrategia cada_una / marcadas) -------------------------------------
+_RX_MARCADOR = re.compile(r"^[\W_]*(seleccion\w*|selecciona\w*|elija|elige|escoja|escoge|select\b|choose|pick)|^[\W_]*$",
+                          re.IGNORECASE)
+
+
+def es_marcador_de_lista(texto):
+    """True si la opción no es una opción de verdad: «Seleccione…», «-- Elija una opción --», «---»."""
+    return bool(_RX_MARCADOR.match(_normal(texto)))
+
+
+def es_bucle(paso):
+    """True si el paso es un «Elegir opción» que se repite con cada opción (cada_una / marcadas) y está activo."""
+    return paso.tipo == "elegir_opcion" and not paso.desactivado and (paso.estrategia or "") in ESTRATEGIAS_BUCLE
+
+
+def fin_del_bucle(pasos, k):
+    """Índice (exclusivo) donde termina la repetición del paso `k`: justo después del primer paso marcado con
+    «Aquí termina «para cada opción»» (desde el mismo paso `k`), o el final del reporte si no hay ninguno.  La marca
+    cierra TODAS las repeticiones abiertas (cada sucursal × cada tabla): lo que va después se hace una sola vez."""
+    for j in range(k, len(pasos)):
+        if pasos[j].fin_bucle and not pasos[j].desactivado:
+            return j + 1
+    return len(pasos)
+
+
+def opciones_del_bucle(paso, leidas=None):
+    """Las opciones que recorre un paso «para cada opción», en orden y sin repetir: «cada_una» = las leídas de la lista
+    (sin «Seleccione…» ni vacías); «marcadas» = las marcadas por el usuario."""
+    if paso.estrategia == "marcadas":
+        base = list(paso.valores)
+    else:
+        base = [t for t in (leidas or []) if _normal(t) and not es_marcador_de_lista(t)]
+    return list(dict.fromkeys(_normal(t) for t in base if _normal(t)))
 
 
 _RX_SEL_OPCION = re.compile(r"role=option|\[role=\"?option|v-list-item|\boption\b|listbox|role=menuitem|"
@@ -1195,6 +1286,9 @@ def validar_repetir_dias(conf):
     modo = conf.get("modo") or "no"
     if modo in ("no", ""):
         return
+    if modo in MODOS_PERIODO:
+        _validar_periodos(conf)
+        return
     if modo not in MODOS_DIAS:
         raise ErrorFlujo("modo no válido: %s" % modo)
     if modo == "fijo":
@@ -1223,7 +1317,7 @@ def dias_a_repetir(conf, hoy=None):
     1: el mes anterior entero); ayer = solo ayer."""
     import datetime as _dt
     validar_repetir_dias(conf)
-    if not conf or (conf.get("modo") or "no") in ("no", ""):
+    if not conf or (conf.get("modo") or "no") in ("no", "") or conf.get("modo") in MODOS_PERIODO:
         return []
     base = hoy or _dt.date.today()
     if isinstance(base, _dt.datetime):
@@ -1247,11 +1341,248 @@ def describir_repetir_dias(conf):
     if not conf or (conf.get("modo") or "no") in ("no", ""):
         return "no"
     modo = conf["modo"]
+    if modo in MODOS_PERIODO:
+        return describir_periodos(conf)
     if modo == "fijo":
         return "del %s al %s" % (conf.get("desde"), conf.get("hasta") or conf.get("desde"))
     if modo == "ultimos":
         return "los últimos %s días" % conf.get("n")
     return MODOS_DIAS.get(modo, modo)
+
+
+# --- v3.9: repetir por meses / por quincenas --------------------------------------------------------------------------
+# En la misma opción «repetir_dias» (los reportes guardados siguen igual):
+#   {"modo": "meses", "rango": "fijo", "desde": "2026-02-01", "hasta": "2026-06-30"}    → un pase por mes
+#   {"modo": "quincenas", "rango": "fijo", "desde": …, "hasta": …, "corte": 15, "mitades": "ambas"}
+#   {"modo": "meses" | "quincenas", "rango": "anterior", …}   → solo el periodo que acaba de terminar (programado)
+# Cada pase pone {desde} y {hasta} (y {fecha} = {desde}).  Las fechas pueden venir como AAAA-MM-DD o DD/MM/AAAA, y un
+# día que no existe (30/02) se corrige al último día de ese mes.
+
+def fecha_flexible(texto, que="la fecha"):
+    """«2026-02-30», «30/02/2026», date… → datetime.date (el día se corrige al último del mes si se pasa)."""
+    import calendar as _cal
+    import datetime as _dt
+    if isinstance(texto, _dt.datetime):
+        return texto.date()
+    if isinstance(texto, _dt.date):
+        return texto
+    s = str(texto or "").strip()
+    m = re.fullmatch(r"(\d{4})-(\d{1,2})-(\d{1,2})", s)
+    if m:
+        a, mes, d = int(m.group(1)), int(m.group(2)), int(m.group(3))
+    else:
+        m = re.fullmatch(r"(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{4})", s)
+        if not m:
+            raise ErrorFlujo("%s debe ser una fecha (AAAA-MM-DD o DD/MM/AAAA): «%s»" % (que[:1].upper() + que[1:], s))
+        d, mes, a = int(m.group(1)), int(m.group(2)), int(m.group(3))
+    if not (1 <= mes <= 12 and 1 <= d <= 31 and 1900 <= a <= 2100):
+        raise ErrorFlujo("%s no es una fecha válida: «%s»" % (que[:1].upper() + que[1:], s))
+    return _dt.date(a, mes, min(d, _cal.monthrange(a, mes)[1]))
+
+
+def corte_de(opciones):
+    """El día de corte de las quincenas de un reporte: el de «Repetir por quincenas», o la opción «corte_quincena», o 15."""
+    opciones = opciones or {}
+    conf = opciones.get("repetir_dias")
+    valor = conf.get("corte") if isinstance(conf, dict) and conf.get("modo") == "quincenas" else None
+    if valor in (None, ""):
+        valor = opciones.get("corte_quincena")
+    try:
+        return plantillas.validar_corte(valor)
+    except plantillas.ErrorPlantilla:
+        return plantillas.CORTE_QUINCENA
+
+
+def _mitades(conf):
+    m = conf.get("mitades") or "ambas"
+    if m not in MITADES:
+        raise ErrorFlujo("qué quincenas no válido: %s (ambas, primera o segunda)" % m)
+    return {"ambas": (1, 2), "primera": (1,), "segunda": (2,)}[m]
+
+
+def _validar_periodos(conf):
+    rango = conf.get("rango") or "fijo"
+    if rango not in RANGOS_PERIODO:
+        raise ErrorFlujo("rango no válido: %s" % rango)
+    if conf["modo"] == "quincenas":
+        try:
+            plantillas.validar_corte(conf.get("corte"))
+        except plantillas.ErrorPlantilla as e:
+            raise ErrorFlujo(str(e)) from None
+        _mitades(conf)
+    if rango == "fijo":
+        d = fecha_flexible(conf.get("desde"), "la fecha inicial")
+        h = fecha_flexible(conf.get("hasta") or conf.get("desde"), "la fecha final")
+        if h < d:
+            raise ErrorFlujo("la fecha final es anterior a la inicial")
+        if len(_periodos_fijos(conf, d, h)) > MAX_PERIODOS:
+            raise ErrorFlujo("como mucho %d periodos: acorta las fechas" % MAX_PERIODOS)
+
+
+def _periodos_fijos(conf, d, h):
+    """Los periodos (meses o quincenas) entre d y h, recortados a [d, h]."""
+    import calendar as _cal
+    import datetime as _dt
+    res = []
+    anio, mes = d.year, d.month
+    while _dt.date(anio, mes, 1) <= h and len(res) <= MAX_PERIODOS:
+        if conf["modo"] == "meses":
+            trozos = [(_dt.date(anio, mes, 1), _dt.date(anio, mes, _cal.monthrange(anio, mes)[1]))]
+        else:
+            mitades = _mitades(conf)
+            trozos = [q for n, q in enumerate(plantillas.quincenas_del_mes(anio, mes, conf.get("corte") or
+                                                                           plantillas.CORTE_QUINCENA), 1) if n in mitades]
+        for ini, fin in trozos:
+            ini, fin = max(ini, d), min(fin, h)
+            if ini <= fin:
+                res.append((ini, fin))
+        anio, mes = (anio, mes + 1) if mes < 12 else (anio + 1, 1)
+    return res
+
+
+def periodos_a_repetir(conf, hoy=None):
+    """v3.9: los pases de «Repetir…» como pares (desde, hasta) de datetime.date, del más antiguo al más reciente.
+    Por días: (día, día).  Por meses / quincenas: cada periodo (los de los extremos, recortados a las fechas elegidas);
+    con «rango: anterior», solo el último periodo ya terminado antes de hoy.  [] si no se repite."""
+    import datetime as _dt
+    validar_repetir_dias(conf)
+    if not conf or (conf.get("modo") or "no") in ("no", ""):
+        return []
+    if conf["modo"] not in MODOS_PERIODO:
+        return [(d, d) for d in dias_a_repetir(conf, hoy)]
+    base = hoy or _dt.date.today()
+    if isinstance(base, _dt.datetime):
+        base = base.date()
+    if (conf.get("rango") or "fijo") == "anterior":
+        if conf["modo"] == "meses":
+            fin = base.replace(day=1) - _dt.timedelta(days=1)
+            return [(fin.replace(day=1), fin)]
+        return [plantillas.quincena_anterior(base, conf.get("corte") or plantillas.CORTE_QUINCENA, _mitades(conf))]
+    d = fecha_flexible(conf.get("desde"), "la fecha inicial")
+    h = fecha_flexible(conf.get("hasta") or conf.get("desde"), "la fecha final")
+    return _periodos_fijos(conf, d, h)
+
+
+def es_por_periodos(conf):
+    return isinstance(conf, dict) and conf.get("modo") in MODOS_PERIODO
+
+
+_NOMBRES_MES = ("enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre",
+                "noviembre", "diciembre")
+
+
+def describir_periodo(desde, hasta):
+    """«febrero 2026» (mes entero), «1.ª quincena de febrero 2026 (01/02 a 14/02)», «del 10/02/2026 al 28/02/2026»."""
+    import calendar as _cal
+    mes = "%s %d" % (_NOMBRES_MES[desde.month - 1], desde.year)
+    ultimo = _cal.monthrange(desde.year, desde.month)[1]
+    if (desde.year, desde.month) == (hasta.year, hasta.month):
+        if desde.day == 1 and hasta.day == ultimo:
+            return mes
+        if desde == hasta:
+            return desde.strftime("%d/%m/%Y")
+        if desde.day == 1 or hasta.day == ultimo:
+            n = "1.ª" if desde.day == 1 else "2.ª"
+            return "%s quincena de %s (%s a %s)" % (n, mes, desde.strftime("%d/%m"), hasta.strftime("%d/%m"))
+    return "del %s al %s" % (desde.strftime("%d/%m/%Y"), hasta.strftime("%d/%m/%Y"))
+
+
+def describir_periodos(conf):
+    """En palabras, para la interfaz y los registros: «por meses, del 01/02/2026 al 30/06/2026», «por quincenas (corte el
+    día 15), la que acaba de terminar»…"""
+    modo = conf.get("modo")
+    txt = MODOS_PERIODO.get(modo, modo)
+    if modo == "quincenas":
+        txt += " (la 2.ª empieza el día %s" % (conf.get("corte") or plantillas.CORTE_QUINCENA)
+        m = conf.get("mitades") or "ambas"
+        txt += "; %s)" % MITADES.get(m, m) if m != "ambas" else ")"
+    if (conf.get("rango") or "fijo") == "anterior":
+        return txt + ", solo " + ("el mes" if modo == "meses" else "la quincena") + " que acaba de terminar"
+    return txt + ", del %s al %s" % (conf.get("desde"), conf.get("hasta") or conf.get("desde"))
+
+
+def nombre_con_periodo(nombre, tipo="descargar"):
+    """El nombre de un archivo con el periodo ({desde} a {hasta}) si no lo lleva ya, para que los archivos de cada pase
+    no se pisen: «{reporte}{ext}» → «{reporte} {desde:%Y-%m-%d} a {hasta:%Y-%m-%d}{ext}»."""
+    base = nombre or ("{nombre}{ext}" if tipo == "descargar" else "Pagina_{hoy:%Y-%m-%d}")
+    if re.search(r"\{(desde|hasta|fecha)\b", base):
+        return base
+    m = re.search(r"\{hoy(?::([^{}]*))?\}", base)
+    if m:                                  # «{reporte} {hoy:%Y-%m-%d}{ext}» → el periodo en lugar de hoy
+        fmt = m.group(1) or "%Y-%m-%d"
+        return base[:m.start()] + "{desde:%s} a {hasta:%s}" % (fmt, fmt) + base[m.end():]
+    extra = " {desde:%Y-%m-%d} a {hasta:%Y-%m-%d}"
+    return base.replace("{ext}", extra + "{ext}", 1) if "{ext}" in base else base + extra
+
+
+_RX_DESDE = re.compile(r"desde|inicio|inicial|\bde\b|from|start|begin", re.IGNORECASE)
+_RX_HASTA = re.compile(r"hasta|fin\b|final|\ba\b|\bto\b|end", re.IGNORECASE)
+
+
+def usar_periodo_en_fechas(flujo):
+    """v3.9: pone «Inicio del periodo» ({desde}) y «Fin del periodo» ({hasta}) en los campos de fecha del reporte (con
+    el formato que ya tenían).  Con dos campos: el de «desde/inicio» (o el primero) y el de «hasta/fin» (o el segundo);
+    con uno, {desde}.  Cambia `flujo` y devuelve los mensajes."""
+    from . import filtros as mod_filtros
+    fechas = [(i, p) for i, p in enumerate(flujo.pasos) if not p.desactivado and mod_filtros.es_fecha(p)]
+    if not fechas:
+        raise ErrorFlujo("El reporte no tiene ningún paso que escriba una fecha: grábalo o mapéalo con el calendario")
+
+    def texto(p):
+        return " ".join([p.objetivo or "", p.filtro or ""] + list(p.selectores[:1]))
+    ini = next((x for x in fechas if _RX_DESDE.search(texto(x[1]))), None)
+    fin = next((x for x in fechas if x is not ini and _RX_HASTA.search(texto(x[1]))), None)
+    if ini is None:
+        ini = next((x for x in fechas if x is not fin), None)
+    if fin is None and len(fechas) > 1:
+        fin = next((x for x in fechas if x is not ini), None)
+    mensajes = []
+    for par, que, palabras in ((ini, "desde", "inicio del periodo"), (fin, "hasta", "fin del periodo")):
+        if par is None:
+            continue
+        i, p = par
+        formato = plantillas.formato_de_fecha(p.valor) or plantillas.FORMATO_FECHA
+        p.valor = "{%s}" % que if formato == plantillas.FORMATO_FECHA else "{%s:%s}" % (que, formato)
+        mensajes.append("paso %d (%s) = %s" % (i + 1, p.nombre_objetivo() or "fecha", palabras))
+    return mensajes
+
+
+# --- v3.9: «Al terminar, ejecutar…» (reportes encadenados) ------------------------------------------------------------
+# opciones["al_terminar"] = {"reportes": [ids], "cuando": "bien" | "siempre"} (ids de reportes guardados)
+CUANDO_ENCADENAR = {"bien": "solo si termina bien", "siempre": "siempre (aunque falle)"}
+
+
+def validar_al_terminar(conf):
+    """Comprueba «Al terminar, ejecutar…» y lo devuelve en su forma canónica ({} = nada)."""
+    if not conf:
+        return {}
+    if not isinstance(conf, dict):
+        raise ErrorFlujo("configuración no válida")
+    ids = []
+    for x in conf.get("reportes") or []:
+        try:
+            n = int(x)
+        except (TypeError, ValueError):
+            raise ErrorFlujo("número de reporte no válido: %s" % x) from None
+        if n <= 0:
+            raise ErrorFlujo("número de reporte no válido: %s" % x)
+        if n not in ids:
+            ids.append(n)
+    cuando = conf.get("cuando") or "bien"
+    if cuando not in CUANDO_ENCADENAR:
+        raise ErrorFlujo("cuándo no válido: %s (bien o siempre)" % cuando)
+    return {"reportes": ids, "cuando": cuando} if ids else {}
+
+
+def reportes_siguientes(flujo, ok=True):
+    """Los ids de los reportes que hay que ejecutar al terminar `flujo` (según haya ido bien o no)."""
+    try:
+        conf = validar_al_terminar((flujo.opciones or {}).get("al_terminar"))
+    except ErrorFlujo:
+        return []
+    if not conf or (conf["cuando"] == "bien" and not ok):
+        return []
+    return list(conf["reportes"])
 
 
 # ============================================================================ v3.5: nombre de las descargas
@@ -1280,10 +1611,13 @@ def es_nombre_de_la_web(nombre):
     return bool(fichas) and all(c == "lit" for c, _ in fichas) and bool("".join(t for _c, t in fichas).strip())
 
 
-def nombre_descarga_defecto(varias=False, por_dias=False):
+def nombre_descarga_defecto(varias=False, por_dias=False, por_periodos=False):
     """La plantilla por defecto del nombre de un archivo descargado.  `varias`: el reporte descarga más de un archivo
-    (se añade el nombre de la web para distinguirlos); `por_dias`: «Repetir por días» ({fecha} = el día descargado)."""
+    (se añade el nombre de la web para distinguirlos); `por_dias`: «Repetir por días» ({fecha} = el día descargado);
+    `por_periodos` (v3.9): «Repetir por meses / quincenas» ({desde} a {hasta} = el periodo descargado)."""
     t = NOMBRE_DESCARGA_VARIAS if varias else NOMBRE_DESCARGA_DEFECTO
+    if por_periodos:
+        return nombre_con_periodo(t)
     return t.replace("{hoy:", "{fecha:") if por_dias else t
 
 
@@ -1292,8 +1626,9 @@ def usar_nombre_del_reporte(flujo, solo_de_la_web=True):
     web (`es_nombre_de_la_web`; con `solo_de_la_web=False` también los vacíos y «{nombre}{ext}»).  Cambia `flujo` y
     devuelve [(índice, antes, después)]."""
     descargas = [i for i, p in enumerate(flujo.pasos) if p.tipo == "descargar" and not p.desactivado]
-    por_dias = bool((flujo.opciones or {}).get("repetir_dias"))
-    nuevo = nombre_descarga_defecto(varias=len(descargas) > 1, por_dias=por_dias)
+    conf = (flujo.opciones or {}).get("repetir_dias")
+    por_dias = bool(conf)
+    nuevo = nombre_descarga_defecto(varias=len(descargas) > 1, por_dias=por_dias, por_periodos=es_por_periodos(conf))
     cambios = []
     for i, p in enumerate(flujo.pasos):
         if p.tipo != "descargar":
@@ -1342,7 +1677,7 @@ def pasos_que_guardan(flujo):
 
 def vista_archivo(plantilla, tipo="descargar", reporte="", variables=None, hoy=None, carpeta="", subcarpeta="",
                   formato="pdf", carpeta_forzada=None, raiz=None, ext=".xlsx", nombre_web="nombre_que_da_la_web",
-                  fecha=None):
+                  fecha=None, desde=None, hasta=None):
     """(archivo, carpeta) de ejemplo, calculados como los calcula el Ejecutor: `plantilla` = el nombre del paso tal como
     se guarda (con {ext}), `carpeta` = la carpeta de descargas del reporte o de la Página (vacío = «descargas» del bot,
     o `carpeta_forzada` si el bot se abrió con otra), `subcarpeta` = la carpeta propia del paso (relativa = dentro de la
@@ -1353,7 +1688,7 @@ def vista_archivo(plantilla, tipo="descargar", reporte="", variables=None, hoy=N
 
     def r(texto, **extra):
         return plantillas.renderizar(texto, variables=variables or {}, hoy=hoy, enmascarar_secretos=True,
-                                     reporte=reporte or "", fecha=fecha, **extra)
+                                     reporte=reporte or "", fecha=fecha, desde=desde, hasta=hasta, **extra)
     if tipo == "guardar_pagina":
         e = "." + (formato or "html").lower()
         archivo = nombre_archivo_seguro(r(plantilla or "Pagina_{hoy:%Y-%m-%d}", ext=e, nombre="Título de la página"))

@@ -485,6 +485,21 @@ def ejecutar_sin_ventana(args):
                 print(res.resumen(), file=sys.stderr, flush=True)
             print("Registro: %s" % res.ruta_log)
             todo_bien = todo_bien and res.ok
+        # v3.9: «Al terminar, ejecutar…»: los reportes encadenados, uno tras otro (sin repetir ninguno: sin círculos)
+        if reporte_id is not None and not args.filtro and not detener.is_set():
+            try:
+                cadena = lote.ejecutar_encadenados(
+                    flujo, reporte_id, todo_bien, log=_log_de(args), carpeta_perfiles=carpeta_perfiles_de(args),
+                    carpeta_registros=registros, carpeta_descargas=descargas, oculto=not args.visible, lento=args.lento,
+                    navegador=args.navegador, variables=variables, detener=detener, almacen=almacen)
+            except KeyboardInterrupt:
+                detener.set()
+                print("Interrumpido.", file=sys.stderr)
+                return 1
+            if cadena is not None:
+                _anotar(args, cadena)
+                print(cadena.resumen())
+                todo_bien = todo_bien and cadena.ok
         return 0 if todo_bien else 1
     finally:
         if almacen is not None:

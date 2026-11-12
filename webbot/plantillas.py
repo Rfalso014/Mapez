@@ -16,6 +16,10 @@ Ejemplos de uso dentro de cualquier texto de un paso:
     {secreto:nombre}           -> contraseña guardada en el Administrador de credenciales
     {cliente}                  -> variable propia definida en el flujo o con --var
     {fecha}  {fecha:%Y-%m-%d}  -> (v3.0) el día que se está descargando con «Repetir por días» (si no, hoy)
+    {desde}  {hasta}           -> (v3.9) inicio y fin del periodo que se descarga con «Repetir por meses / quincenas» (con
+                                  «Repetir por días», ese día; sin repetir, hoy).  {desde:%Y-%m-%d} con formato.
+    {inicio_quincena_anterior} {fin_quincena_anterior}   (v3.9) la última quincena ya terminada (corte: el día 15 o el
+                                  que elija el usuario)
     {opcion}                   -> (v3.0) texto de la última opción elegida por un paso «Elegir opción»
     {{  y  }}                  -> llaves literales
 """
@@ -28,8 +32,12 @@ FORMATO_FECHA = "%d/%m/%Y"
 
 FECHAS = ("hoy", "ayer", "inicio_mes", "fin_mes", "inicio_mes_anterior", "fin_mes_anterior",
           # v3.6: semanas y año (el lunes es el primer día de la semana)
-          "lunes_semana", "lunes_semana_anterior", "domingo_semana_anterior", "inicio_anio")
-RESERVADAS = set(FECHAS) | {"dias", "ext", "nombre", "secreto", "fecha", "opcion", "reporte"}
+          "lunes_semana", "lunes_semana_anterior", "domingo_semana_anterior", "inicio_anio",
+          # v3.9: la última quincena ya terminada (el mes se parte en el día de corte: el 15 si no se dice otro)
+          "inicio_quincena_anterior", "fin_quincena_anterior")
+PERIODO = ("desde", "hasta")         # v3.9: inicio y fin del periodo que se descarga (Repetir por meses / quincenas)
+RESERVADAS = set(FECHAS) | {"dias", "ext", "nombre", "secreto", "fecha", "opcion", "reporte"} | set(PERIODO)
+CORTE_QUINCENA = 15                  # v3.9: día en que empieza la 2.ª quincena (si el reporte no dice otro)
 
 AYUDA_PLANTILLAS = [
     ("{hoy}", "Fecha de hoy"),
@@ -48,6 +56,11 @@ AYUDA_PLANTILLAS = [
     ("{inicio_anio}", "1 de enero de este año"),
     ("{fecha}", "Día que se descarga (Repetir por días; si no, hoy)"),
     ("{fecha:%Y-%m-%d}", "Ese día con formato aaaa-mm-dd"),
+    ("{inicio_quincena_anterior}", "Primer día de la última quincena terminada"),
+    ("{fin_quincena_anterior}", "Último día de la última quincena terminada"),
+    ("{desde}", "Inicio del periodo que se descarga (Repetir por meses / quincenas)"),
+    ("{hasta}", "Fin del periodo que se descarga (Repetir por meses / quincenas)"),
+    ("{desde:%Y-%m-%d}", "Inicio del periodo con formato aaaa-mm-dd"),
     ("{reporte}", "Nombre completo del reporte"),
 ]
 
@@ -74,7 +87,42 @@ def _fin_mes(f):
     return f.replace(day=calendar.monthrange(f.year, f.month)[1])
 
 
-def _fecha_nombrada(nombre, ahora):
+def validar_corte(corte):
+    """v3.9: el día de corte de las quincenas (2–28: la 2.ª quincena empieza ese día).  Devuelve el entero."""
+    if corte in (None, ""):
+        return CORTE_QUINCENA
+    try:
+        c = int(corte)
+    except (TypeError, ValueError):
+        raise ErrorPlantilla("El día de corte de la quincena debe ser un número entre 2 y 28")
+    if not 2 <= c <= 28:
+        raise ErrorPlantilla("El día de corte de la quincena debe estar entre 2 y 28 (llegó %s)" % corte)
+    return c
+
+
+def quincenas_del_mes(anio, mes, corte=CORTE_QUINCENA):
+    """v3.9: las dos quincenas del mes [(día 1, corte − 1), (corte, último día)] como pares de datetime.date."""
+    corte = validar_corte(corte)
+    fin = calendar.monthrange(anio, mes)[1]
+    return [(datetime.date(anio, mes, 1), datetime.date(anio, mes, corte - 1)),
+            (datetime.date(anio, mes, corte), datetime.date(anio, mes, fin))]
+
+
+def quincena_anterior(hoy=None, corte=CORTE_QUINCENA, mitades=(1, 2)):
+    """v3.9: (desde, hasta) de la última quincena YA TERMINADA antes de `hoy`.  `mitades`: (1,) solo la primera (del 1
+    al corte − 1), (2,) solo la segunda (del corte a fin de mes).  Con corte 15: el 15/11 → 01/11–14/11; el 01/12 →
+    15/11–30/11; el 12/11 → 15/10–31/10."""
+    base = _como_fecha(hoy).date()
+    anio, mes = base.year, base.month
+    for _ in range(3):
+        for n, (d, h) in reversed(list(enumerate(quincenas_del_mes(anio, mes, corte), 1))):
+            if n in mitades and h < base:
+                return d, h
+        anio, mes = (anio, mes - 1) if mes > 1 else (anio - 1, 12)
+    raise ErrorPlantilla("No se pudo calcular la quincena anterior")
+
+
+def _fecha_nombrada(nombre, ahora, corte=CORTE_QUINCENA):
     if nombre == "hoy":
         return ahora
     if nombre == "ayer":
@@ -91,6 +139,10 @@ def _fecha_nombrada(nombre, ahora):
         return ahora - datetime.timedelta(days=ahora.weekday() + 1)
     if nombre == "inicio_anio":
         return ahora.replace(month=1, day=1)
+    if nombre in ("inicio_quincena_anterior", "fin_quincena_anterior"):
+        d, h = quincena_anterior(ahora, corte)
+        x = d if nombre == "inicio_quincena_anterior" else h
+        return datetime.datetime(x.year, x.month, x.day)
     anterior = _inicio_mes(ahora) - datetime.timedelta(days=1)  # último día del mes anterior
     if nombre == "fin_mes_anterior":
         return anterior
@@ -142,13 +194,15 @@ def _tokens(texto):
 
 def renderizar(texto, variables=None, hoy=None, ext=None, nombre=None,
                resolver_secreto=None, enmascarar_secretos=False,
-               formato_defecto=FORMATO_FECHA, fecha=None, reporte=None):
+               formato_defecto=FORMATO_FECHA, fecha=None, reporte=None, desde=None, hasta=None, corte=None):
     """Sustituye las plantillas de `texto`.
 
     - hoy: fecha «de hoy» (inyectable para pruebas); por defecto, la actual.
     - ext / nombre: valores para {ext} y {nombre} (solo en nombres de descarga).
     - fecha: el día de {fecha} («Repetir por días»); por defecto, `hoy`.
     - reporte: (v3.5) el nombre del reporte para {reporte} (una variable propia «reporte» del flujo tiene prioridad).
+    - desde / hasta: (v3.9) el periodo de {desde} y {hasta}; por defecto, `fecha` (y si no, `hoy`).  Una variable propia
+      del flujo con ese nombre tiene prioridad (reportes de antes).  corte: día de corte de las quincenas (15).
     - resolver_secreto: función nombre -> contraseña.  Con enmascarar_secretos=True
       no se llama y se devuelve «********» (para registros).
     """
@@ -165,8 +219,14 @@ def renderizar(texto, variables=None, hoy=None, ext=None, nombre=None,
         nombre_var, _, resto = cont.partition(":")
         nombre_var = nombre_var.strip()
         if nombre_var in FECHAS:
-            fecha = _fecha_nombrada(nombre_var, ahora)
-            partes.append(_formatear(fecha, resto if resto else formato_defecto))
+            fecha_n = _fecha_nombrada(nombre_var, ahora, corte if corte is not None else CORTE_QUINCENA)
+            partes.append(_formatear(fecha_n, resto if resto else formato_defecto))
+        elif nombre_var in PERIODO and nombre_var not in variables:
+            limite = desde if nombre_var == "desde" else hasta
+            if limite is None:
+                limite = fecha
+            dia = _como_fecha(limite) if limite is not None else ahora
+            partes.append(_formatear(dia, resto if resto else formato_defecto))
         elif nombre_var == "fecha":
             dia = _como_fecha(fecha) if fecha is not None else ahora
             partes.append(_formatear(dia, resto if resto else formato_defecto))
@@ -176,8 +236,8 @@ def renderizar(texto, variables=None, hoy=None, ext=None, nombre=None,
                 n = int(cantidad.strip())
             except ValueError:
                 raise ErrorPlantilla("{dias:N} necesita un número entero, por ejemplo {dias:-7}: {%s}" % cont)
-            fecha = ahora + datetime.timedelta(days=n)
-            partes.append(_formatear(fecha, formato if formato else formato_defecto))
+            fecha_n = ahora + datetime.timedelta(days=n)
+            partes.append(_formatear(fecha_n, formato if formato else formato_defecto))
         elif nombre_var == "ext":
             if ext is None:
                 raise ErrorPlantilla("{ext} solo se puede usar en el nombre de una descarga")
@@ -335,13 +395,15 @@ RELATIVAS = (
     ("hoy", "hoy"), ("ayer", "ayer"), ("dias", "hace N días"), ("lunes_semana", "lunes de esta semana"),
     ("lunes_semana_anterior", "lunes de la semana pasada"), ("domingo_semana_anterior", "domingo de la semana pasada"),
     ("inicio_mes", "inicio de este mes"), ("fin_mes", "fin de este mes"), ("inicio_mes_anterior", "inicio del mes anterior"),
-    ("fin_mes_anterior", "fin del mes anterior"), ("inicio_anio", "1 de enero"), ("fecha", "el día que se descarga"),
+    ("fin_mes_anterior", "fin del mes anterior"), ("inicio_quincena_anterior", "inicio de la quincena anterior"),
+    ("fin_quincena_anterior", "fin de la quincena anterior"), ("inicio_anio", "1 de enero"),
+    ("fecha", "el día que se descarga"), ("desde", "inicio del periodo"), ("hasta", "fin del periodo"),
 )
 _NOMBRES_RELATIVAS = dict(RELATIVAS)
 # Fechas escritas tal cual que se reconocen como fecha fija (sin «aaaammdd»: un número de 8 cifras puede ser otra cosa;
 # dd/mm antes que mm/dd: «10/11/2026» es el 10 de noviembre).
 _FORMATOS_FIJA = ("%d/%m/%Y", "%Y-%m-%d", "%d-%m-%Y", "%d.%m.%Y", "%Y/%m/%d", "%d/%m/%y", "%m/%d/%Y", "%d %b %Y")
-_RX_RELATIVA = re.compile(r"^\{(%s|fecha)(?::([^{}]+))?\}$" % "|".join(FECHAS))
+_RX_RELATIVA = re.compile(r"^\{(%s|fecha|desde|hasta)(?::([^{}]+))?\}$" % "|".join(FECHAS))
 _RX_DIAS = re.compile(r"^\{dias:\s*([+-]?\d+)\s*(?::([^{}]+))?\}$")
 
 
@@ -407,7 +469,7 @@ def plantilla_fecha(a):
             except (TypeError, ValueError):
                 raise ErrorPlantilla("«Hace N días» necesita un número")
             return "{dias:%d%s}" % (n, (":" + formato) if formato else "")
-        if que not in FECHAS and que != "fecha":
+        if que not in FECHAS and que not in ("fecha",) + PERIODO:
             raise ErrorPlantilla("Fecha desconocida: %s" % que)
         return "{%s%s}" % (que, (":" + formato) if formato else "")
     raise ErrorPlantilla("Modo de fecha desconocido: %s" % modo)

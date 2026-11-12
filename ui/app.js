@@ -351,16 +351,21 @@
   const FORMATOS_FECHA = [['%d/%m/%Y', ''], ['%Y-%m-%d', 'como los campos de fecha'], ['%d-%m-%Y', ''], ['%m/%d/%Y', 'el mes primero'],
     ['%d.%m.%Y', ''], ['%Y/%m/%d', ''], ['%d/%m/%y', 'año con 2 cifras'], ['%Y%m%d', 'sin separadores'], ['%d %b %Y', 'mes en inglés']];
   const FECHAS_NOMBRADAS = ['hoy', 'ayer', 'inicio_mes', 'fin_mes', 'inicio_mes_anterior', 'fin_mes_anterior', 'lunes_semana',
-    'lunes_semana_anterior', 'domingo_semana_anterior', 'inicio_anio'];
+    'lunes_semana_anterior', 'domingo_semana_anterior', 'inicio_anio', 'inicio_quincena_anterior', 'fin_quincena_anterior'];
   // Botones de «Cambia sola» (en este orden) y sus nombres en palabras
   const RELATIVAS = [['hoy', 'Hoy'], ['ayer', 'Ayer'], ['dias', 'Hace N días'], ['lunes_semana', 'Lunes de esta semana'],
     ['lunes_semana_anterior', 'Lunes de la semana pasada'], ['domingo_semana_anterior', 'Domingo de la semana pasada'],
     ['inicio_mes', 'Inicio de este mes'], ['fin_mes', 'Fin de este mes'], ['inicio_mes_anterior', 'Inicio del mes anterior'],
-    ['fin_mes_anterior', 'Fin del mes anterior'], ['inicio_anio', '1 de enero'], ['fecha', 'El día que se descarga']];
+    ['fin_mes_anterior', 'Fin del mes anterior'], ['inicio_quincena_anterior', 'Inicio de la quincena anterior'],
+    ['fin_quincena_anterior', 'Fin de la quincena anterior'], ['inicio_anio', '1 de enero'], ['fecha', 'El día que se descarga'],
+    ['desde', 'Inicio del periodo'], ['hasta', 'Fin del periodo']];
   const PALABRAS_FECHA = { hoy: 'hoy', ayer: 'ayer', lunes_semana: 'lunes de esta semana', lunes_semana_anterior: 'lunes de la semana pasada',
     domingo_semana_anterior: 'domingo de la semana pasada', inicio_mes: 'inicio de este mes', fin_mes: 'fin de este mes',
     inicio_mes_anterior: 'inicio del mes anterior', fin_mes_anterior: 'fin del mes anterior', inicio_anio: '1 de enero',
-    fecha: 'el día que se descarga' };
+    fecha: 'el día que se descarga', inicio_quincena_anterior: 'inicio de la quincena anterior',
+    fin_quincena_anterior: 'fin de la quincena anterior', desde: 'inicio del periodo', hasta: 'fin del periodo' };
+  // v3.9: fechas que solo tienen sentido al repetir (Repetir por días / meses / quincenas): se ofrecen con opc.conFecha
+  const SOLO_REPETIR = ['fecha', 'desde', 'hasta'];
   // Fechas escritas tal cual que se entienden como «fecha fija» (sin aaaammdd; dd/mm antes que mm/dd)
   const FORMATOS_FIJA = ['%d/%m/%Y', '%Y-%m-%d', '%d-%m-%Y', '%d.%m.%Y', '%Y/%m/%d', '%d/%m/%y', '%m/%d/%Y', '%d %b %Y'];
   const MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
@@ -429,7 +434,7 @@
     if (d.getFullYear() !== a || d.getMonth() !== mes - 1 || d.getDate() !== dia) return null;
     return strfFecha(d, fmt) === s ? d : null;
   }
-  const RX_RELATIVA = new RegExp('^\\{(' + FECHAS_NOMBRADAS.join('|') + '|fecha)(?::([^{}]+))?\\}$');
+  const RX_RELATIVA = new RegExp('^\\{(' + FECHAS_NOMBRADAS.join('|') + '|fecha|desde|hasta)(?::([^{}]+))?\\}$');
   function analizarFecha(texto) {
     const t = texto === null || texto === undefined ? '' : String(texto);
     if (!t.trim()) return { modo: 'vacia' };
@@ -473,8 +478,20 @@
       case 'lunes_semana_anterior': return sumarDias(lunesDe(d), -7);
       case 'domingo_semana_anterior': return sumarDias(lunesDe(d), -1);
       case 'inicio_anio': return new Date(y, 0, 1);
-      default: return d;                // hoy, fecha (Repetir por días: hoy si no se repite)
+      case 'inicio_quincena_anterior': return quincenaAnterior(d, E.corteQuincena || 15)[0];
+      case 'fin_quincena_anterior': return quincenaAnterior(d, E.corteQuincena || 15)[1];
+      default: return d;                // hoy, fecha, desde, hasta (al repetir; si no se repite, hoy)
     }
+  }
+  // v3.9: la última quincena ya terminada (lo mismo que plantillas.quincena_anterior): el mes se parte en el día de corte
+  function quincenaAnterior(hoy, corte) {
+    let y = hoy.getFullYear(), m = hoy.getMonth();
+    for (let k = 0; k < 3; k++) {
+      const partes = [[new Date(y, m, 1), new Date(y, m, corte - 1)], [new Date(y, m, corte), new Date(y, m + 1, 0)]];
+      for (const q of partes.reverse()) if (q[1] < soloDia(hoy)) return q;
+      m -= 1; if (m < 0) { m = 11; y -= 1; }
+    }
+    return [hoy, hoy];
   }
   const fechaDe = (a, hoy) => (a.modo === 'fija' ? deIso(a.fecha) : (a.modo === 'relativa' ? fechaRelativa(a.que, a.n, hoy) : null));
   function palabrasFecha(a) {
@@ -724,7 +741,7 @@
         const chips = h('div', { class: 'fecha-chips', role: 'group', 'aria-label': 'Fechas que cambian solas' });
         const botones = [];
         for (const [k, t] of RELATIVAS) {
-          if (k === 'fecha' && !opc.conFecha && st.que !== 'fecha') continue;
+          if (SOLO_REPETIR.includes(k) && !opc.conFecha && st.que !== k) continue;
           if (k === 'dias') {
             const b = h('button', { type: 'button', class: 'dia-chip ancho', 'data-fecha-rel': 'dias', onclick: () => { ponerN(); } }, futuro ? 'Dentro de' : 'Hace');
             botones.push(b);
@@ -2282,7 +2299,7 @@
       const sel = h('select', { 'aria-label': f.nombre });
       const etiqueta = (o) => (o.mas_reciente ? '★ ' : '') + o.texto + (o.nueva ? '  — nueva' : '');
       sel.appendChild(h('option', { value: '__mas_reciente' }, 'La más reciente' + (f.mas_reciente ? ' (hoy: ' + f.mas_reciente + ')' : '')));
-      if (['primera', 'ultima', 'contiene', 'por_fecha'].includes(f.estrategia_guardada)) {
+      if (['primera', 'ultima', 'contiene', 'por_fecha', 'cada_una', 'marcadas'].includes(f.estrategia_guardada)) {
         sel.appendChild(h('option', { value: '__guardada' }, 'Como está guardado: ' + (E.ayuda && E.ayuda.estrategias ? E.ayuda.estrategias[f.estrategia_guardada] : f.estrategia_guardada) +
           (f.valor_guardado ? ' «' + f.valor_guardado + '»' : '')));
       }
@@ -2450,8 +2467,10 @@
     marcar: ['selectores', 'objetivo', 'marcado'], esperar_elemento: ['selectores', 'objetivo', 'estado'], esperar_texto: ['texto'],
     esperar_segundos: ['segundos'], descargar: ['selectores', 'objetivo', 'boton', 'doble', 'nombre', 'carpeta'],
     guardar_pagina: ['formato', 'nombre', 'carpeta'], pasar_raton: ['selectores', 'objetivo'],
-    iniciar_sesion: ['sitio', 'campos', 'enviar'], elegir_opcion: ['selectores', 'filtro', 'objetivo', 'estrategia', 'valor'],
+    iniciar_sesion: ['sitio', 'campos', 'enviar'], elegir_opcion: ['selectores', 'filtro', 'objetivo', 'estrategia', 'valor', 'valores'],
+    imprimir: ['que_imprimir', 'impresora'],          // v3.9
   };
+  const ES_BUCLE = (p) => p && p.tipo === 'elegir_opcion' && !p.desactivado && ['cada_una', 'marcadas'].includes(p.estrategia);
   const CON_CARGA = ['abrir_url', 'clic', 'escribir', 'tecla', 'seleccionar', 'marcar', 'descargar', 'iniciar_sesion',
                      'esperar_elemento', 'esperar_texto', 'elegir_opcion'];
   const ETIQUETAS = { url: 'Dirección (URL)', selectores: 'Selectores (uno por línea; el primero que funcione)', objetivo: 'Nombre del elemento',
@@ -2460,10 +2479,13 @@
     segundos: 'Segundos', nombre: 'Guardar como (plantilla)', carpeta: 'Carpeta (vacío = la de descargas)', formato: 'Formato',
     sitio: 'Página (host)', estrategia: 'Qué opción elegir', filtro: 'Nombre del filtro (p. ej. «Elegir corte»)', nota: 'Nota', opcional: 'Opcional (si no aparece, sigue)',
     desactivado: 'Desactivado (no se ejecuta)', timeout: 'Tiempo máximo en segundos (vacío = automático)', pagina: 'Pestaña (1 = la principal)',
-    esperar_carga: 'Esperar a que la página cargue después' };
+    esperar_carga: 'Esperar a que la página cargue después',
+    que_imprimir: 'Qué imprimir', impresora: 'Impresora (vacío = la predeterminada de Windows)', valores: 'Opciones que se recorren (una por línea)',
+    fin_bucle: 'Aquí termina «para cada opción»' };
   const SELECTS = { boton: ['izquierdo', 'derecho', 'medio'], estado: ['visible', 'oculto'], formato: ['pdf', 'html', 'csv'],
-                    estrategia: ['fija', 'mas_reciente', 'primera', 'ultima', 'contiene', 'por_fecha'] };
-  const BOOLS = ['doble', 'fecha_directa', 'marcado', 'opcional', 'desactivado'];
+                    estrategia: ['fija', 'mas_reciente', 'primera', 'ultima', 'contiene', 'por_fecha', 'cada_una', 'marcadas'],
+                    que_imprimir: ['archivo', 'pagina'] };
+  const BOOLS = ['doble', 'fecha_directa', 'marcado', 'opcional', 'desactivado', 'fin_bucle'];
   const PLANTILLA = ['url', 'valor', 'texto', 'nombre', 'carpeta'];
 
   function vistaPrevia(inp, ctx) {
@@ -2489,11 +2511,16 @@
     const controles = {};
     const form = h('div', { class: 'formulario' });
     let usarCalendario = null;            // v3.6: pasa el «Texto» de un paso Escribir al campo de fecha
+    const filas = {};                     // v3.9: clave -> [etiqueta, contenido] (para enseñarlas u ocultarlas)
     const add = (clave, control, ayuda, vista) => {
-      form.appendChild(h('label', null, ETIQUETAS[clave] || clave));
-      form.appendChild(ayuda ? h('div', null, vista || control, ayuda) : (vista || control));
+      const l = h('label', null, ETIQUETAS[clave] || clave);
+      const c = ayuda ? h('div', null, vista || control, ayuda) : (vista || control);
+      form.appendChild(l);
+      form.appendChild(c);
       controles[clave] = control;
+      filas[clave] = [l, c];
     };
+    const verFila = (clave, si) => (filas[clave] || []).forEach((x) => x.classList.toggle('oculto', !si));
     for (const clave of CAMPOS[p.tipo] || []) {
       if (clave === 'selectores') add(clave, h('textarea', { 'aria-label': ETIQUETAS[clave] }, (p.selectores || []).join('\n')));
       else if (clave === 'nombre' && p.tipo === 'descargar') {
@@ -2530,8 +2557,44 @@
       } else if (clave === 'enviar') {
         add('enviar', h('textarea', { 'aria-label': 'Botón para entrar' }, ((p.enviar || {}).selectores || []).join('\n')),
           h('div', { class: 'ayuda' }, 'Selectores del botón para entrar (vacío = pulsar Enter).'));
+      } else if (clave === 'valores') {
+        // v3.9: «las que marque»: las opciones que se recorren, una por línea, con las conocidas para marcarlas
+        const ta = h('textarea', { 'aria-label': ETIQUETAS.valores, 'data-valores-opcion': '1', rows: '4' }, (p.valores || []).join('\n'));
+        const conocidas = h('div', { class: 'lista-casillas', 'data-opciones-conocidas': '1' });
+        const lineas = () => ta.value.split('\n').map((x) => x.trim()).filter((x) => x);
+        const pintarConocidas = (lista) => {
+          if (!lista.length) { conocidas.replaceChildren(h('div', { class: 'ayuda' }, 'Todavía no se conocen las opciones de esta lista: escríbelas (una por línea) o pulsa «Actualizar opciones» en «⚙ Usar filtros».')); return; }
+          conocidas.replaceChildren(h('div', { class: 'ayuda' }, 'Opciones conocidas (márcalas):'), ...lista.map((t) => {
+            const cb = h('input', { type: 'checkbox', checked: lineas().includes(t), 'data-opcion-conocida': t });
+            cb.addEventListener('change', () => { const v = lineas().filter((x) => x !== t); if (cb.checked) v.push(t); ta.value = v.join('\n'); });
+            return h('label', { class: 'casilla' }, cb, ' ' + t);
+          }));
+        };
+        pintarConocidas([]);
+        if (ctx && ctx.reporteId && ctx.reporteId() && ctx.indice !== null && ctx.indice !== undefined) {
+          api('GET', 'reportes/' + ctx.reporteId() + '/filtros').then((r) => {
+            const f = (r.filtros || []).find((x) => x.paso === ctx.indice);
+            pintarConocidas(f ? (f.opciones || []).map((o2) => o2.texto).filter((t) => t) : []);
+          }).catch(() => {});
+        }
+        add(clave, ta, conocidas);
+      } else if (clave === 'impresora') {
+        // v3.9: la impresora, con la lista de las instaladas
+        const inp = h('input', { type: 'text', value: p.impresora || '', 'aria-label': ETIQUETAS.impresora, 'data-impresora': '1', placeholder: '(la predeterminada de Windows)' });
+        const lista = h('div', { class: 'fila', 'data-impresoras': '1' });
+        const ver = boton('Ver las impresoras', async () => {
+          try {
+            const r = await api('GET', 'impresoras');
+            if (!(r.impresoras || []).length) { lista.replaceChildren(h('span', { class: 'ayuda' }, 'No hay ninguna impresora instalada en Windows.')); return; }
+            lista.replaceChildren(boton('La predeterminada' + (r.predeterminada ? ' (' + r.predeterminada + ')' : ''), () => { inp.value = ''; }, 'chico', { 'data-impresora-elegir': '' }),
+              ...r.impresoras.map((n) => boton(n, () => { inp.value = n; }, 'chico', { 'data-impresora-elegir': n })));
+          } catch (e) { errorToast(e); }
+        }, 'chico', { 'data-ver-impresoras': '1' });
+        add(clave, inp, h('div', null, ver, lista, h('div', { class: 'ayuda' }, 'Se imprime con el programa de Windows para ese tipo de archivo (Excel, el lector de PDF…), como «clic derecho → Imprimir». Los PDF se pueden imprimir aunque no tengas un lector de PDF instalado.')));
       } else if (SELECTS[clave]) {
-        const s = h('select', { 'aria-label': ETIQUETAS[clave] }, SELECTS[clave].map((v) => h('option', { value: v }, clave === 'estrategia' && E.ayuda ? v + ' — ' + E.ayuda.estrategias[v] : v)));
+        const nombres = { estrategia: E.ayuda && E.ayuda.estrategias, que_imprimir: E.ayuda && E.ayuda.que_imprimir };
+        const s = h('select', { 'aria-label': ETIQUETAS[clave] }, SELECTS[clave].map((v) => h('option', { value: v },
+          nombres[clave] ? (clave === 'estrategia' ? v + ' — ' : '') + (nombres[clave][v] || v) : v)));
         s.value = p[clave] || SELECTS[clave][0];
         add(clave, s);
       } else if (BOOLS.includes(clave)) {
@@ -2544,9 +2607,28 @@
     if (usarCalendario && controles.fecha_directa) {
       controles.fecha_directa.addEventListener('change', () => { if (controles.fecha_directa.checked) usarCalendario(); });
     }
+    if (p.tipo === 'elegir_opcion' && controles.estrategia) {
+      // v3.9: «todas» / «las que marque» = «para cada opción»: el texto no se usa; las marcadas, sí
+      const ayudaBucle = h('div', { class: 'ancho alerta info oculto', 'data-ayuda-bucle': '1' },
+        'Los pasos que van después de este se repiten con cada opción (un archivo por opción), hasta el paso marcado con «Aquí termina «para cada opción»» o hasta el final del reporte. ' +
+        'Al nombre del archivo se le añade la opción (o usa {opcion} en el nombre). Si una opción falla, se apunta y se sigue con la siguiente.');
+      form.insertBefore(ayudaBucle, filas.valor ? filas.valor[0] : null);
+      const verEst = () => {
+        const est = controles.estrategia.value;
+        verFila('valor', !['cada_una', 'marcadas', 'mas_reciente', 'primera', 'ultima'].includes(est));
+        verFila('valores', est === 'marcadas');
+        ayudaBucle.classList.toggle('oculto', !['cada_una', 'marcadas'].includes(est));
+      };
+      controles.estrategia.addEventListener('change', verEst);
+      verEst();
+    }
     form.appendChild(h('div', { class: 'ancho' }, h('hr')));
     add('nota', h('input', { type: 'text', value: p.nota || '' }));
     for (const b of ['opcional', 'desactivado']) add(b, h('input', { type: 'checkbox', checked: !!p[b] }));
+    if (p.fin_bucle || (ctx && ctx.bucleAntes)) {       // v3.9: solo si antes hay un «para cada opción»
+      add('fin_bucle', h('input', { type: 'checkbox', checked: !!p.fin_bucle, 'data-fin-bucle': '1' }),
+        h('div', { class: 'ayuda' }, 'Márcalo en el último paso que se repite con cada opción: los pasos de después se hacen una sola vez (si hay varias listas «para cada opción», aquí terminan todas).'));
+    }
     add('timeout', h('input', { type: 'number', value: p.timeout === undefined || p.timeout === null ? '' : p.timeout, min: '0' }));
     add('pagina', h('input', { type: 'number', value: (p.pagina || 0) + 1, min: '1' }));
     if (CON_CARGA.includes(p.tipo)) {
@@ -2560,6 +2642,8 @@
       for (const [clave, ctl] of Object.entries(controles)) {
         if (clave.startsWith('campo_')) continue;
         if (clave === 'selectores') n.selectores = ctl.value.split('\n').map((x) => x.trim()).filter((x) => x);
+        else if (clave === 'valores') n.valores = n.estrategia === 'marcadas' || (controles.estrategia && controles.estrategia.value === 'marcadas')
+          ? ctl.value.split('\n').map((x) => x.trim()).filter((x) => x) : [];
         else if (clave === 'enviar') {
           const sels = ctl.value.split('\n').map((x) => x.trim()).filter((x) => x);
           n.enviar = sels.length ? Object.assign({}, p.enviar || {}, { selectores: sels }) : { tecla: 'Enter' };
@@ -2613,7 +2697,9 @@
     const avisoPares = h('div', { class: 'alerta oculto' });
     const avisoNombres = h('div', { class: 'alerta oculto', 'data-aviso-nombres': '1' });
     const problemas = h('div', { class: 'alerta error oculto' });
-    const ctxPaso = { reporte: () => inNombre.value.trim() || 'Nuevo reporte' };
+    const ctxPaso = { reporte: () => inNombre.value.trim() || 'Nuevo reporte', reporteId: () => id };
+    // v3.9: lo que el diálogo del paso necesita saber de su sitio en el reporte (opciones conocidas, «para cada opción»)
+    const ctxDe = (i) => Object.assign({}, ctxPaso, { indice: i, bucleAntes: flujo.pasos.slice(0, i).some(ES_BUCLE) });
 
     const op = flujo.opciones || {};
     const o = {
@@ -2629,19 +2715,42 @@
     };
     o.navegador.value = op.navegador || 'chrome'; o.si_existe.value = op.si_existe || 'numerar';
     const rd = op.repetir_dias || {};
+    // v3.9: «Repetir: por días / por meses / por quincenas» (todo se guarda en la misma opción repetir_dias)
+    const esPeriodo = (m) => m === 'meses' || m === 'quincenas';
     const dias = {
-      modo: h('select', null, h('option', { value: 'no' }, 'No repetir'), Object.entries(E.ayuda.modos_dias).map(([k, v]) => h('option', { value: k }, v))),
+      tipo: h('select', { 'aria-label': 'Repetir', 'data-repetir-tipo': '1' }, h('option', { value: 'no' }, 'No repetir (una sola vez)'),
+        h('option', { value: 'dias' }, 'Por días (un archivo por día)'), h('option', { value: 'meses' }, 'Por meses (un archivo por mes)'),
+        h('option', { value: 'quincenas' }, 'Por quincenas (un archivo por quincena)')),
+      modo: h('select', { 'aria-label': 'Qué días' }, Object.entries(E.ayuda.modos_dias).map(([k, v]) => h('option', { value: k }, v))),
+      rango: h('select', { 'aria-label': 'Qué periodos', 'data-repetir-rango': '1' }, Object.entries(E.ayuda.rangos_periodo || {}).map(([k, v]) => h('option', { value: k }, v))),
+      corte: h('input', { type: 'number', value: rd.corte || E.ayuda.corte_quincena || 15, min: '2', max: '28', class: 'corto', 'aria-label': 'Día en que empieza la segunda quincena', 'data-repetir-corte': '1' }),
+      mitades: h('select', { 'aria-label': 'Qué quincenas', 'data-repetir-mitades': '1' }, Object.entries(E.ayuda.mitades || {}).map(([k, v]) => h('option', { value: k }, v))),
       desde: h('input', { type: 'text', value: rd.desde || '', 'aria-label': 'Repetir desde el día' }),
       hasta: h('input', { type: 'text', value: rd.hasta || '', 'aria-label': 'Repetir hasta el día' }),
       n: h('input', { type: 'number', value: rd.n || 7, min: '1', max: '366' }),
     };
-    dias.modo.value = rd.modo || 'no';
+    dias.tipo.value = esPeriodo(rd.modo) ? rd.modo : (rd.modo && rd.modo !== 'no' ? 'dias' : 'no');
+    dias.modo.value = rd.modo && E.ayuda.modos_dias[rd.modo] ? rd.modo : 'fijo';
+    dias.rango.value = rd.rango || 'fijo';
+    dias.mitades.value = rd.mitades || 'ambas';
     // v3.6: los días de «Repetir por días» con el calendario (fechas fijas AAAA-MM-DD, como antes)
     const filaDias = h('div', { class: 'fila', 'data-repetir-desde-hasta': '1' },
       campoFecha(dias.desde, { iso: true, vacio: 'Desde…', titulo: 'Repetir desde el día' }), h('span', { class: 'sub' }, 'hasta'),
       campoFecha(dias.hasta, { iso: true, vacio: 'Hasta… (= el mismo día)', titulo: 'Repetir hasta el día' }));
-    const infoDias = h('div', { class: 'ayuda' });
+    const infoDias = h('div', { class: 'ayuda', 'data-repetir-vista': '1', 'aria-live': 'polite' });
+    const avisoPeriodo = h('div', { class: 'alerta aviso oculto', 'data-repetir-sin-periodo': '1' });
+    // filas que se enseñan u ocultan (etiqueta + control) según lo elegido
+    const filaRep = (texto, ...ctl) => { const l = h('label', null, texto); const c = h('div', null, ...ctl); return { l, c, el: [l, c], ver: (si) => { l.classList.toggle('oculto', !si); c.classList.toggle('oculto', !si); } }; };
+    const rep = {
+      modo: filaRep('Qué días', dias.modo),
+      rango: filaRep('Qué periodos', dias.rango, h('div', { class: 'ayuda' }, '«Entre dos fechas» sirve para ponerse al día (baja todos los meses o quincenas del rango, un archivo por cada uno). «Solo el que acaba de terminar» es para programarlo: cada vez baja solo el último mes o quincena completos.')),
+      fechas: filaRep('Desde / hasta', filaDias, h('div', { class: 'ayuda', 'data-repetir-ayuda-fechas': '1' })),
+      n: filaRep('Número de días', dias.n),
+      corte: filaRep('La 2.ª quincena empieza el día', dias.corte, h('div', { class: 'ayuda' }, 'Con 15: del 1 al 14 y del 15 a fin de mes. Pon otro día si tu reporte corta en otro (entre 2 y 28).')),
+      mitades: filaRep('Qué quincenas', dias.mitades),
+    };
     Object.values(o).concat(Object.values(dias)).forEach((x) => { x.addEventListener('change', () => { marcar(); refrescar(); }); });
+    dias.corte.addEventListener('input', () => { marcar(); });
 
     // v3.7: «Archivo descargado»: el nombre de cada paso que guarda un archivo (es el mismo dato que «Guardar como» al
     // editar el paso) y la carpeta del reporte, con «Se guardará como: …».  La extensión se pone sola.
@@ -2694,14 +2803,34 @@
       ops.timeout_descarga = parseFloat(o.timeout_descarga.value || '600'); ops.pausa_entre_pasos = parseFloat(o.pausa_entre_pasos.value || '0');
       ops.carpeta_descargas = o.carpeta_descargas.value.trim(); ops.si_existe = o.si_existe.value;
       ops.recuperacion_automatica = o.recuperacion_automatica.checked; ops.esperar_carga = o.esperar_carga.checked;
+      const tipoRep = dias.tipo.value;
       const m = dias.modo.value;
-      ops.repetir_dias = m === 'no' ? null : { modo: m, desde: dias.desde.value, hasta: dias.hasta.value || dias.desde.value, n: parseInt(dias.n.value || '1', 10) };
+      if (tipoRep === 'no') ops.repetir_dias = null;
+      else if (tipoRep === 'dias') ops.repetir_dias = { modo: m, desde: dias.desde.value, hasta: dias.hasta.value || dias.desde.value, n: parseInt(dias.n.value || '1', 10) };
+      else {
+        // v3.9: por meses / por quincenas
+        const r = { modo: tipoRep, rango: dias.rango.value };
+        if (r.rango === 'fijo' || dias.desde.value) { r.desde = dias.desde.value; r.hasta = dias.hasta.value || dias.desde.value; }
+        if (tipoRep === 'quincenas') {
+          r.corte = parseInt(dias.corte.value || '15', 10) || 15; r.mitades = dias.mitades.value;
+          ops.corte_quincena = r.corte; E.corteQuincena = r.corte;
+        }
+        ops.repetir_dias = r;
+      }
+      ops.al_terminar = leerAlTerminar();
+      if (!ops.al_terminar) delete ops.al_terminar;
       flujo.opciones = ops;
       const vars = {};
       o.variables.value.split(';').forEach((par) => { const i = par.indexOf('='); if (i > 0) vars[par.slice(0, i).trim()] = par.slice(i + 1).trim(); });
       flujo.variables = vars;
-      filaDias.classList.toggle('oculto', m !== 'fijo');
-      dias.n.parentElement.classList.toggle('oculto', m !== 'ultimos');
+      const periodo = esPeriodo(tipoRep);
+      rep.modo.ver(tipoRep === 'dias');
+      rep.rango.ver(periodo);
+      rep.fechas.ver((tipoRep === 'dias' && m === 'fijo') || (periodo && dias.rango.value === 'fijo'));
+      rep.n.ver(tipoRep === 'dias' && m === 'ultimos');
+      rep.corte.ver(tipoRep === 'quincenas');
+      rep.mitades.ver(tipoRep === 'quincenas');
+      rep.fechas.c.querySelector('[data-repetir-ayuda-fechas]').textContent = periodo ? 'Si el último día no existe (p. ej. 30 de febrero) se usa el último día de ese mes. Los meses o quincenas de los extremos se recortan a estas fechas.' : '';
     }
 
     async function refrescar() {
@@ -2730,19 +2859,87 @@
       avisoNombres.classList.toggle('oculto', !nw.length);
       infoDias.textContent = r.dias && r.dias.length ? 'Se ejecutará ' + r.dias.length + ' veces: del ' + r.dias[0] + ' al ' + r.dias[r.dias.length - 1] +
         '. Usa {fecha} o {fecha:%d/%m/%Y} en los campos de fecha y en el nombre del archivo.' : '';
+      pintarPeriodos(r.periodos || []);
       pintarArchivo();
+    }
+
+    // v3.9: la vista previa de «Repetir por meses / quincenas» («Se bajarán 5 archivos: febrero 2026, marzo 2026…») y el
+    // aviso si ningún paso usa el periodo (con el botón que lo pone en los dos campos de fecha)
+    function pintarPeriodos(periodos) {
+      const tipoRep = dias.tipo.value;
+      avisoPeriodo.replaceChildren();
+      avisoPeriodo.classList.add('oculto');
+      if (!esPeriodo(tipoRep)) return;
+      const que = tipoRep === 'meses' ? 'mes' : 'quincena';
+      if (!periodos.length) { infoDias.textContent = dias.rango.value === 'fijo' ? 'Elige las fechas «desde» y «hasta» para ver qué ' + (que === 'mes' ? 'meses' : 'quincenas') + ' se bajarán.' : ''; }
+      else if (dias.rango.value === 'anterior') {
+        infoDias.textContent = 'Cada vez que se ejecute bajará solo ' + (que === 'mes' ? 'el mes' : 'la quincena') + ' que acaba de terminar. Si se ejecutara hoy: ' + periodos[0].texto +
+          ' (del ' + fechaCorta(periodos[0].desde) + ' al ' + fechaCorta(periodos[0].hasta) + '). Prográmalo con «Programar…»: se propone el horario que corresponde.';
+      } else {
+        const n = periodos.length;
+        const nombres = periodos.slice(0, 8).map((x) => x.texto).join(', ') + (n > 8 ? '… (y ' + (n - 8) + ' más)' : '');
+        const sin = periodos.filter((x) => x.sin_terminar).map((x) => x.texto);
+        infoDias.textContent = 'Se bajará' + (n === 1 ? ' 1 archivo' : 'n ' + n + ' archivos') + ' (uno por ' + que + '): ' + nombres + '.' +
+          (sin.length ? ' Ojo: ' + sin.join(', ') + (sin.length === 1 ? ' todavía no ha terminado.' : ' todavía no han terminado.') : '');
+      }
+      const usaPeriodo = flujo.pasos.some((p) => !p.desactivado && /\{(desde|hasta|fecha)\b/.test((p.valor || '') + ' ' + (p.texto || '')));
+      if (!usaPeriodo) {
+        avisoPeriodo.appendChild(h('span', null, 'Ningún paso usa todavía el periodo: en los campos de fecha del reporte elige «Inicio del periodo» y «Fin del periodo» (Editar el paso → calendario → «Cambia sola»). '));
+        avisoPeriodo.appendChild(boton('Ponerlo en los campos de fecha', usarPeriodo, 'chico primario', { 'data-usar-periodo': '1' }));
+        avisoPeriodo.classList.remove('oculto');
+      }
+    }
+    const fechaCorta = (iso) => { const d = deIso(iso); return d ? strfFecha(d, '%d/%m/%Y') : iso; };
+    async function usarPeriodo() {
+      leerFormulario();
+      try {
+        const res = await api('POST', 'flujo/usar_periodo', { flujo });
+        flujo = res.flujo; marcar(); refrescar();
+        toast(res.mensajes.join(' · ') + '. Pulsa Guardar.', 'ok', 9000);
+      } catch (e) { errorToast(e); }
+    }
+
+    // v3.9: «Al terminar, ejecutar…»: otros reportes que se ejecutan después de este (sin círculos: lo comprueba el bot)
+    const alTerminar = (flujo.opciones || {}).al_terminar || {};
+    const cajaCadena = h('div', { class: 'lista-casillas', 'data-al-terminar-lista': '1' });
+    const cuandoCadena = h('select', { 'aria-label': 'Cuándo', 'data-al-terminar-cuando': '1' },
+      Object.entries(E.ayuda.cuando_encadenar || { bien: 'solo si termina bien', siempre: 'siempre' }).map(([k, v]) => h('option', { value: k }, v)));
+    cuandoCadena.value = alTerminar.cuando || 'bien';
+    cuandoCadena.addEventListener('change', marcar);
+    const casillasCadena = [];
+    (async () => {
+      let lista = [];
+      try { lista = (await api('GET', 'reportes')).reportes || []; } catch (e) { lista = []; }
+      const elegidos = (alTerminar.reportes || []).map(Number);
+      const otros = lista.filter((x) => x.id !== id);
+      // los ya elegidos primero (en su orden), luego los demás por nombre
+      otros.sort((a, b) => { const ia = elegidos.indexOf(a.id), ib = elegidos.indexOf(b.id); return (ia < 0 ? 999 : ia) - (ib < 0 ? 999 : ib) || a.nombre.localeCompare(b.nombre); });
+      if (!otros.length) { cajaCadena.replaceChildren(h('div', { class: 'ayuda' }, 'No hay otros reportes guardados.')); return; }
+      cajaCadena.replaceChildren(...otros.map((x) => {
+        const cb = h('input', { type: 'checkbox', checked: elegidos.includes(x.id), 'data-al-terminar': String(x.id), 'aria-label': 'Ejecutar «' + x.nombre + '» después' });
+        cb.addEventListener('change', marcar);
+        casillasCadena.push({ id: x.id, cb });
+        return h('label', { class: 'casilla' }, cb, ' ' + x.nombre);
+      }));
+    })();
+    function leerAlTerminar() {
+      if (!casillasCadena.length) return alTerminar.reportes && alTerminar.reportes.length ? alTerminar : null;   // (aún cargando)
+      const ids = casillasCadena.filter((x) => x.cb.checked).map((x) => x.id);
+      return ids.length ? { reportes: ids, cuando: cuandoCadena.value } : null;
     }
 
     function filaPaso(p, i, total) {
       const clase = p.desactivado ? 'desactivado' : '';
       return h('tr', { class: clase, 'data-indice': String(i) }, h('td', null, String(i + 1)),
-        h('td', null, p.accion, p.opcional ? ' ' : null, p.opcional ? chip('opcional') : null, p.auto ? ' ' : null, p.auto ? chip('automático', 'info') : null),
+        h('td', null, p.accion, p.opcional ? ' ' : null, p.opcional ? chip('opcional') : null, p.auto ? ' ' : null, p.auto ? chip('automático', 'info') : null,
+          ES_BUCLE(p) ? ' ' : null, ES_BUCLE(p) ? chip('para cada opción', 'info') : null,
+          p.fin_bucle ? ' ' : null, p.fin_bucle ? chip('aquí termina «para cada opción»', 'info') : null),
         h('td', { class: 'detalle', title: p.descripcion }, p.detalle || '', (p.problemas || []).length ? h('div', { class: 'problema' }, p.problemas.join('; ')) : null),
         h('td', null, p.nota ? h('span', { class: 'ayuda' }, p.nota) : ''),
         h('td', { class: 'acciones' },
           boton('↑', () => mover(i, -1), 'chico', { 'aria-label': 'Subir', disabled: i === 0 }),
           boton('↓', () => mover(i, 1), 'chico', { 'aria-label': 'Bajar', disabled: i === total - 1 }), ' ',
-          boton('Editar', () => dialogoPaso(flujo.pasos[i], (n) => { flujo.pasos[i] = n; marcar(); refrescar(); }, ctxPaso), 'chico'), ' ',
+          boton('Editar', () => dialogoPaso(flujo.pasos[i], (n) => { flujo.pasos[i] = n; marcar(); refrescar(); }, ctxDe(i)), 'chico'), ' ',
           boton(p.desactivado ? 'Activar' : 'Desactivar', () => { flujo.pasos[i].desactivado = !flujo.pasos[i].desactivado; marcar(); refrescar(); }, 'chico'), ' ',
           boton('Insertar debajo', () => insertar(i + 1), 'chico'), ' ',
           boton('✕', async () => { if (await confirmar('Borrar paso', '¿Borrar el paso ' + (i + 1) + ' («' + p.descripcion + '»)?', 'Borrar', true)) { flujo.pasos.splice(i, 1); marcar(); refrescar(); } }, 'chico peligro', { 'aria-label': 'Borrar paso' })));
@@ -2773,7 +2970,8 @@
           if (tipo.value === 'elegir_opcion') base.estrategia = 'mas_reciente';
           if (tipo.value === 'abrir_url') base.url = inUrl.value;
           if (tipo.value === 'descargar') base.nombre = '{reporte} {hoy:%Y-%m-%d}{ext}';
-          dialogoPaso(base, (n) => { flujo.pasos.splice(pos, 0, n); marcar(); refrescar(); }, ctxPaso);
+          if (tipo.value === 'imprimir') base.que_imprimir = 'archivo';
+          dialogoPaso(base, (n) => { flujo.pasos.splice(pos, 0, n); marcar(); refrescar(); }, Object.assign(ctxDe(pos), { indice: null }));
         } }] });
     }
     async function convertir() {
@@ -2846,13 +3044,22 @@
           ef('Carpeta', h('div', null, campoRuta(o.carpeta_descargas, { titulo: 'Carpeta de descargas del reporte' }),
             h('div', { class: 'ayuda' }, 'Vacío = la carpeta de descargas del bot (la ruta exacta sale en «Se guardará como»).'))),
           ef('Si el archivo ya existe', o.si_existe))),
-      h('details', { class: 'opciones' }, h('summary', null, 'Opciones del reporte (tiempos, navegador, repetir por días)'),
+      // v3.9: «Repetir»: por días, por meses o por quincenas (un archivo por cada uno)
+      h('details', { class: 'opciones', open: dias.tipo.value !== 'no', 'data-repetir': '1' },
+        h('summary', null, 'Repetir: un archivo por día, por mes o por quincena'),
+        h('div', { class: 'formulario' }, ef('Repetir', dias.tipo), ...rep.modo.el, ...rep.rango.el, ...rep.corte.el, ...rep.mitades.el,
+          ...rep.fechas.el, ...rep.n.el, h('div', { class: 'ancho' }, infoDias), h('div', { class: 'ancho' }, avisoPeriodo))),
+      // v3.9: «Al terminar, ejecutar…»
+      h('details', { class: 'opciones', open: !!(alTerminar.reportes || []).length, 'data-al-terminar': '1' },
+        h('summary', null, 'Al terminar, ejecutar otro reporte'),
+        h('div', { class: 'formulario' }, ef('Reportes que se ejecutan después', h('div', null, cajaCadena,
+          h('div', { class: 'ayuda' }, 'Cuando este reporte termine, se ejecutan los marcados, uno tras otro (y los que ellos tengan marcados). Un reporte nunca se ejecuta dos veces seguidas: si se formara un círculo, el bot avisa al guardar.'))),
+          ef('Cuándo', cuandoCadena))),
+      h('details', { class: 'opciones' }, h('summary', null, 'Opciones del reporte (tiempos, navegador, variables)'),
         h('div', { class: 'formulario' }, ef('Navegador', o.navegador), ef('Tiempo máximo por paso (s)', o.timeout_paso),
           ef('Espera máxima de descargas/reportes (s)', o.timeout_descarga), ef('Pausa entre pasos (s)', o.pausa_entre_pasos),
           ef('Recuperación automática de menús', o.recuperacion_automatica), ef('Esperar a que la página cargue', o.esperar_carga),
-          ef('Variables', o.variables), ef('Repetir por días', dias.modo), h('label', null, 'Desde / hasta'),
-          filaDias, h('label', null, 'Número de días'), h('div', null, dias.n),
-          h('div', { class: 'ancho' }, infoDias)))));
+          ef('Variables', o.variables)))));
     c.appendChild(avisoPares);
     c.appendChild(avisoNombres);
     c.appendChild(problemas);
@@ -2863,13 +3070,16 @@
   };
 
   // v3.4: «Programar…» con el editor «Cuándo» (días, varias horas, horarios distintos por día, cada N horas, mensual…)
-  async function programarReporte(id, nombre) {
+  async function programarReporte(id, nombre, inicial) {
     let g = {};
     try { g = await api('GET', 'reportes/' + id + '/programar'); } catch (e) { g = {}; }
-    const ed = editorCuando(g.guardada || { reglas: [reglaPorDefecto('semanal', { horas: ['07:00'] })] }, { textoNunca: 'Sin programar (solo cuando pulse «Ejecutar»)' });
+    // v3.9: si el reporte se repite por meses / quincenas, se propone el horario que corresponde (día 1, día de corte)
+    const sug = g.sugerida || null;
+    const ed = editorCuando(inicial || g.guardada || (sug ? { reglas: sug.reglas } : null) || { reglas: [reglaPorDefecto('semanal', { horas: ['07:00'] })] }, { textoNunca: 'Sin programar (solo cuando pulse «Ejecutar»)' });
     abrirModal({ titulo: 'Programar «' + nombre + '»', ancho: true, contenido: h('div', { 'data-modal-programar': 'reporte' },
       h('p', { class: 'ayuda' }, 'Elige cuándo se ejecuta. Se crea una tarea en el Programador de tareas de Windows que ejecuta el reporte (en segundo plano o en vivo: lo eliges en «Avisos y vista»; con tu usuario y solo con la sesión de Windows iniciada): es la tarea la que hace que se ejecute solo. Para «cada día descargar el día anterior» usa {ayer} en el campo de fecha.'),
       g.existe ? h('div', { class: 'alerta ok' }, 'Ya tiene tarea en Windows: ' + (g.descripcion || '') + '. Si la cambias, se sustituye.') : h('div', { class: 'alerta aviso' }, 'Todavía no tiene tarea en Windows: no se ejecuta solo.'),
+      sug ? h('div', { class: 'alerta', 'data-horario-periodo': '1' }, sug.texto, (g.guardada || inicial) ? boton('Usar este horario', () => { cerrarModal(); programarReporte(id, nombre, { reglas: sug.reglas }); }, 'chico', { 'data-usar-horario-periodo': '1' }) : null) : null,
       ed.caja),
       botones: [{ texto: 'Cancelar', accion: cerrarModal },
         ...(g.existe ? [{ texto: 'Quitar la tarea de Windows', clase: 'peligro', accion: () => quitarTareaWindows('reportes/' + id + '/quitar_tarea') }] : []),
@@ -4305,9 +4515,20 @@
   async function abrirArchivo(ruta, carpeta) {
     try { await api('POST', 'archivos/' + (carpeta ? 'carpeta' : 'abrir'), { ruta }); } catch (e) { errorToast(e); }
   }
+  // v3.9: «Imprimir» un archivo descargado (en la impresora predeterminada de Windows; se pregunta antes)
+  const EXT_IMPRIMIR = ['.pdf', '.xlsx', '.xls', '.xlsm', '.csv', '.txt', '.doc', '.docx', '.htm', '.html', '.png', '.jpg', '.jpeg'];
+  async function imprimirArchivo(ruta) {
+    if (!(await confirmar('Imprimir', '¿Imprimir «' + nombreArchivo(ruta) + '» en la impresora predeterminada de Windows?', 'Imprimir'))) return;
+    try {
+      const r = await api('POST', 'archivos/imprimir', { ruta });
+      toast('Enviado a la impresora «' + r.impresora + '»: ' + r.archivo, 'ok', 8000);
+    } catch (e) { errorToast(e); }
+  }
   function filaArchivo(ruta) {
+    const ext = (/\.[^.\\/]+$/.exec(ruta || '') || [''])[0].toLowerCase();
     return h('li', null, h('div', { class: 'crece' }, h('div', null, nombreArchivo(ruta)), h('div', { class: 'sub' }, ruta)),
-      boton('Abrir archivo', () => abrirArchivo(ruta, false), 'chico'), boton('Abrir carpeta', () => abrirArchivo(ruta, true), 'chico'));
+      boton('Abrir archivo', () => abrirArchivo(ruta, false), 'chico'), boton('Abrir carpeta', () => abrirArchivo(ruta, true), 'chico'),
+      EXT_IMPRIMIR.includes(ext) ? boton('Imprimir', () => imprimirArchivo(ruta), 'chico', { 'data-imprimir-archivo': '1' }) : null);
   }
   async function iniciarSesionCorreo(cu) {
     try {

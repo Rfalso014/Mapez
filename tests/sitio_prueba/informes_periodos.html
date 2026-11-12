@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Informes por periodo</title>
+<!--
+  v3.9 (pruebas): página de informes con un periodo (desde / hasta, texto dd/mm/aaaa) y una lista nativa de tablas.
+  «Consultar» enseña lo pedido y el botón «Descargar» (un CSV hecho en la página: tabla, desde, hasta).
+  La tabla «Roto» falla siempre (no sale el botón «Descargar»): sirve para probar que «para cada opción» sigue con la
+  siguiente.  Sin red: todo pasa en la página.
+-->
+<style>body { font-family: sans-serif; } .oculto { display: none; }</style>
+</head>
+<body>
+<h1>Informes</h1>
+<div><label for="desde">Fecha desde</label> <input type="text" id="desde" name="desde" placeholder="dd/mm/aaaa"></div>
+<div><label for="hasta">Fecha hasta</label> <input type="text" id="hasta" name="hasta" placeholder="dd/mm/aaaa"></div>
+<div><label for="tabla">Tabla</label>
+  <select id="tabla" name="tabla">
+    <option value="">Seleccione una tabla</option>
+    <option value="ventas">Ventas</option>
+    <option value="pagos">Pagos</option>
+    <option value="roto">Roto</option>
+  </select>
+</div>
+<div><label for="sucursal">Sucursal</label>
+  <select id="sucursal" name="sucursal">
+    <option value="norte">Norte</option>
+    <option value="sur">Sur</option>
+  </select>
+</div>
+<button type="button" id="consultar">Consultar</button>
+<p id="resultado"></p>
+<button type="button" id="descargar" class="oculto">Descargar</button>
+<script>
+(function () {
+  var pedido = null;
+  var $ = function (id) { return document.getElementById(id); };
+  $('consultar').addEventListener('click', function () {
+    var sel = $('tabla');
+    var tabla = sel.options[sel.selectedIndex].text;
+    var suc = $('sucursal').options[$('sucursal').selectedIndex].text;
+    $('descargar').classList.add('oculto');
+    if (!sel.value) { $('resultado').textContent = 'Elige una tabla'; return; }
+    if (sel.value === 'roto') { $('resultado').textContent = 'Error del servidor al consultar ' + tabla; return; }
+    pedido = { tabla: tabla, sucursal: suc, desde: $('desde').value, hasta: $('hasta').value };
+    setTimeout(function () {
+      $('resultado').textContent = 'Consulta ' + tabla + ' (' + suc + ') del ' + pedido.desde + ' al ' + pedido.hasta;
+      $('descargar').classList.remove('oculto');
+    }, 150);
+  });
+  $('descargar').addEventListener('click', function () {
+    var csv = 'tabla,sucursal,desde,hasta\r\n' + [pedido.tabla, pedido.sucursal, pedido.desde, pedido.hasta].join(',') + '\r\n';
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
+    a.download = 'informe.csv';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  });
+})();
+</script>
+</body>
+</html>

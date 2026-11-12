@@ -719,3 +719,8 @@ code.comando { display: block; font: 12px/1.45 var(--f-mono); background: var(--
   .guia-foco, .guia-globo, .guia-flecha, .guia-flecha path, .vagon, .rueda, .tren, .parada, .sf-dia { animation: none !important; transition: none !important; }
   .guia-globo.arriba .guia-flecha { transform: rotate(180deg); }
 }
+
+/* v3.9: listas de casillas («Al terminar, ejecutar…», opciones de «para cada opción») */
+.lista-casillas { display: flex; flex-direction: column; gap: 4px; max-height: 220px; overflow-y: auto; padding: 4px 0; }
+.lista-casillas .casilla { display: flex; align-items: center; gap: 6px; font-weight: normal; overflow-wrap: anywhere; }
+.lista-casillas .casilla input { flex: none; }

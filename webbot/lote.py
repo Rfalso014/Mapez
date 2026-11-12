@@ -16,9 +16,10 @@ import os
 import re
 import shutil
 
-from .flujo import ErrorFlujo, Flujo, slug
+from .flujo import ErrorFlujo, Flujo, reportes_siguientes, slug
 
 NOMBRE_HISTORIAL = "_historial.json"
+MAX_ENCADENADOS = 50          # v3.9: como mucho tantos reportes en una tanda con «Al terminar, ejecutar…»
 CARPETA_PAPELERA = "_papelera"
 FORMATO_FECHA = "%Y-%m-%d %H:%M:%S"
 
@@ -166,6 +167,7 @@ class ResultadoFlujoLote:
         self.archivos = []
         self.ruta_log = ""
         self.ruta_captura = ""
+        self.despues_de = ""           # v3.9: nombre del reporte tras el que se ejecutó («Al terminar, ejecutar…»)
 
     @property
     def ok(self):
@@ -200,14 +202,15 @@ class ResultadoLote:
             ", %d sin ejecutar" % sum(1 for i in self.items if i.estado == "no_ejecutado")
             if any(i.estado == "no_ejecutado" for i in self.items) else "")]
         for i in self.items:
+            tras = (" (después de «%s»)" % i.despues_de) if i.despues_de else ""
             if i.estado == "ok":
-                lineas.append("  BIEN    %s — %d archivo(s)%s" % (
-                    i.nombre, len(i.archivos), (": " + ", ".join(os.path.basename(a) for a in i.archivos))
+                lineas.append("  BIEN    %s%s — %d archivo(s)%s" % (
+                    i.nombre, tras, len(i.archivos), (": " + ", ".join(os.path.basename(a) for a in i.archivos))
                     if i.archivos else ""))
             elif i.estado == "no_ejecutado":
-                lineas.append("  SIN EJECUTAR  %s" % i.nombre)
+                lineas.append("  SIN EJECUTAR  %s%s" % (i.nombre, tras))
             else:
-                lineas.append("  FALLÓ   %s — %s" % (i.nombre, i.mensaje))
+                lineas.append("  FALLÓ   %s%s — %s" % (i.nombre, tras, i.mensaje))
         lineas.append("Archivos descargados: %d" % len(self.archivos))
         return "\n".join(lineas)
 
@@ -215,8 +218,13 @@ class ResultadoLote:
 def ejecutar_lote(rutas, carpeta_perfiles, carpeta_registros, carpeta_descargas=None, oculto=True, lento=False,
                   navegador=None, variables=None, progreso=None, log=None, detener=None, historial=None,
                   hoy=None, resolver_secreto=None, fabrica_ejecutor=None, aviso_lote=None, almacen=None,
-                  pedir_acceso=None, accesos=None):
+                  pedir_acceso=None, accesos=None, encadenar=True, ya_ejecutados=None, despues_de=""):
     """Ejecuta los reportes de `rutas` uno tras otro.  Si uno falla, sigue con el siguiente.
+
+    v3.9 «Al terminar, ejecutar…»: si un reporte guardado lo tiene (`encadenar`), los reportes que dice se ponen en la
+    cola justo detrás (si terminó bien, o siempre, según diga).  Un reporte no se ejecuta dos veces en el mismo lote
+    (así no hay círculos: A → B → A); `ya_ejecutados` = ids que ya se ejecutaron antes (cadena de una ejecución suelta),
+    `despues_de` = nombre del reporte tras el que van los de `rutas`.
 
     - Cada elemento es el id (int) de un reporte de `almacen` o la ruta de un archivo `.json`.
     - Cada reporte usa su propio perfil: `carpeta_perfiles/reporte_<id>` (los archivos:
@@ -235,15 +243,55 @@ def ejecutar_lote(rutas, carpeta_perfiles, carpeta_registros, carpeta_descargas=
     from .almacen import ErrorAlmacen, nombre_perfil
     fabrica = fabrica_ejecutor or Ejecutor
     lote = ResultadoLote()
-    total = len(rutas)
+    cola = list(rutas)                         # v3.9: crece con los reportes encadenados («Al terminar, ejecutar…»)
+    tras = {k: despues_de for k in range(len(cola))} if despues_de else {}
+    vistos = {int(x) for x in (ya_ejecutados or [])} | {r for r in cola if isinstance(r, int)}
+
+    def encadenar_tras(fl, ok, n, ruta):
+        """Pone en la cola (justo detrás del actual) los reportes de «Al terminar, ejecutar…» de `fl`."""
+        if not encadenar or not isinstance(ruta, int) or almacen is None:
+            return
+        pos = n
+        for sig in reportes_siguientes(fl, ok):
+            fila_sig = almacen.obtener(sig)
+            nombre_sig = fila_sig["nombre"] if fila_sig else "reporte %d" % sig
+            if fila_sig is None:
+                if log:
+                    log("AVISO: «%s» tenía que ejecutar después el reporte número %d, pero ya no existe" % (fl.nombre, sig))
+                continue
+            if sig in vistos:
+                if log:
+                    log("(«%s» ya se ejecuta en esta tanda: no se repite después de «%s», así no hay círculos)"
+                        % (nombre_sig, fl.nombre))
+                continue
+            if len(cola) >= MAX_ENCADENADOS:
+                if log:
+                    log("AVISO: demasiados reportes encadenados (máximo %d): no se añade «%s»" % (MAX_ENCADENADOS,
+                                                                                               nombre_sig))
+                break
+            vistos.add(sig)
+            for k in sorted(tras, reverse=True):           # (los que van detrás se corren un puesto)
+                if k >= pos:
+                    tras[k + 1] = tras.pop(k)
+            cola.insert(pos, sig)
+            tras[pos] = fl.nombre
+            pos += 1
+            if log:
+                log("Al terminar «%s» se ejecutará «%s»" % (fl.nombre, nombre_sig))
+
     try:
-        for n, ruta in enumerate(rutas, 1):
+        n = 0
+        while n < len(cola):
+            ruta = cola[n]
+            n += 1
+            total = len(cola)
             es_id = isinstance(ruta, int)
             if es_id:
                 fila = almacen.obtener(ruta) if almacen is not None else None
                 item = ResultadoFlujoLote(ruta, fila["nombre"] if fila else "reporte %d" % ruta)
             else:
                 item = ResultadoFlujoLote(ruta, os.path.splitext(os.path.basename(ruta))[0])
+            item.despues_de = tras.get(n - 1, "")
             lote.items.append(item)
             if detener is not None and detener.is_set():
                 lote.detenido = True
@@ -287,6 +335,8 @@ def ejecutar_lote(rutas, carpeta_perfiles, carpeta_registros, carpeta_descargas=
                 if log:
                     log("ERROR inesperado: " + item.mensaje)
                 _terminar_item(lote, item, historial, ruta, None, aviso_lote, n, total, almacen)
+                if not (detener is not None and detener.is_set()):
+                    encadenar_tras(fl, False, n, ruta)
                 continue
             item.archivos = list(res.archivos)
             item.ruta_log = res.ruta_log
@@ -301,10 +351,51 @@ def ejecutar_lote(rutas, carpeta_perfiles, carpeta_registros, carpeta_descargas=
                 item.estado = "error"
                 item.mensaje = res.resumen()
             _terminar_item(lote, item, historial, ruta, res, aviso_lote, n, total, almacen)
+            if item.estado != "detenido":
+                encadenar_tras(fl, res.ok, n, ruta)
     finally:
         if almacen is not None:
             almacen.liberar_hilo()      # la conexión de este hilo de trabajo no se queda abierta
     return lote
+
+
+def ejecutar_encadenados(flujo, reporte_id, ok, log=None, **kw):
+    """v3.9: tras ejecutar UN reporte guardado (botón «Ejecutar», tarea programada de un solo reporte), ejecuta los de su
+    «Al terminar, ejecutar…» como un lote (con sus propias cadenas).  None si no tiene nada que ejecutar después."""
+    if reporte_id is None:
+        return None
+    siguientes = [s for s in reportes_siguientes(flujo, ok) if s != reporte_id]
+    if not siguientes:
+        return None
+    if log:
+        log("=== Al terminar «%s»: %d reporte(s) más ===" % (flujo.nombre, len(siguientes)))
+    return ejecutar_lote(siguientes, log=log, ya_ejecutados=[reporte_id], despues_de=flujo.nombre, **kw)
+
+
+def siguientes_guardados(almacen, reporte_id):
+    """Los ids de «Al terminar, ejecutar…» de un reporte guardado (sin mirar si termina bien o no); [] si no se puede."""
+    try:
+        fl = almacen.cargar_flujo(reporte_id)
+    except Exception:          # noqa: BLE001  (reporte borrado o dañado: no encadena nada)
+        return []
+    return reportes_siguientes(fl, True)          # (con ok=True salen los de «solo si termina bien» y los de «siempre»)
+
+
+def buscar_circulo(reporte_id, nuevos, siguientes_de):
+    """v3.9: si `reporte_id` ejecutara `nuevos` al terminar, ¿se formaría un círculo (A → B → … → A)?  Devuelve los ids
+    del círculo ([A, B, …, A]) o None.  `siguientes_de(id)` = los que ejecuta ese reporte al terminar."""
+    pila = [(int(s), [int(reporte_id), int(s)]) for s in nuevos or []]
+    vistos = set()
+    while pila:
+        x, camino = pila.pop()
+        if x == int(reporte_id):
+            return camino
+        if x in vistos or len(camino) > MAX_ENCADENADOS:
+            continue
+        vistos.add(x)
+        for y in siguientes_de(x) or []:
+            pila.append((int(y), camino + [int(y)]))
+    return None
 
 
 def _terminar_item(lote, item, historial, ruta, res, aviso_lote, n, total, almacen=None):
