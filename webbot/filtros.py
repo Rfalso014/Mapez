@@ -38,7 +38,7 @@ FUENTES = {"mapa": "del mapa de la página", "ejecucion": "de una ejecución", "
 _RX_FECHA_PLANTILLA = re.compile(r"\{(hoy|ayer|fecha|inicio_mes|fin_mes|inicio_mes_anterior|fin_mes_anterior|"
                                  r"manana|mañana|lunes|semana|dias|lunes_semana|lunes_semana_anterior|"
                                  r"domingo_semana_anterior|inicio_anio|desde|hasta|inicio_quincena_anterior|"
-                                 r"fin_quincena_anterior)\b", re.IGNORECASE)
+                                 r"fin_quincena_anterior|dia_mes_anterior)\b", re.IGNORECASE)
 _RX_FECHA_TEXTO = re.compile(r"fecha|date|desde|hasta|inicio|final|periodo|período|día|dia\b", re.IGNORECASE)
 _RX_FECHA_VALOR = re.compile(r"^\s*\d{1,4}[/\-.]\d{1,2}[/\-.]\d{1,4}\s*$")
 _RX_CORTE = re.compile(r"^\s*\d{1,2}\s*-\s*\d{4}\b")

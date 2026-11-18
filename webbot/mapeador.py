@@ -594,7 +594,10 @@ def _paso_de_filtro(f, e, t, sels, nombre):
             error = plantillas.validar(valor or "")
             if error:
                 raise ErrorMapeo("La fecha de «%s» no es válida: %s" % (nombre, error))
+        # v3.9: «las que marque» lleva las opciones marcadas (`valores`); «todas» no necesita ningún texto
+        marcadas = [str(x) for x in (e.get("valores") or []) if str(x).strip()] if est == "marcadas" else []
         return Paso("elegir_opcion", selectores=sels, objetivo=nombre, estrategia=est, filtro=nombre,
+                    valores=marcadas,
                     valor=(valor or "") if est in ("fija", "contiene", "por_fecha") else "")
     if t == "fecha":
         cual = e.get("fecha") or "hoy"

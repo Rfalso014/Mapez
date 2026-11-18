@@ -26,6 +26,16 @@ class ErrorGrabacion(RuntimeError):
     pass
 
 
+def _respuesta_pdf(resp):
+    """v3.9: ¿la respuesta es un documento PDF que el navegador enseña en la pestaña?"""
+    try:
+        return (resp.request.resource_type == "document" and resp.url.startswith(("http://", "https://"))
+                and "application/pdf" in (resp.headers.get("content-type") or "").lower()
+                and "attachment" not in (resp.headers.get("content-disposition") or "").lower())
+    except Exception:
+        return False
+
+
 class GrabadorWeb:
     def __init__(self, flujo, carpeta_perfil, navegador="chrome", oculto=False, al_evento=None,
                  hoy=None, fechas_automaticas=False, carpeta_descargas_grabacion=None, agrupar_inicio_sesion=True,
@@ -47,6 +57,8 @@ class GrabadorWeb:
         self._t_ultimo = None           # instante (monotonic) del último paso anotado
         self._t_evento = None           # instante en que llegó el evento que se está procesando
         self._por_id = {}               # id del clic (JS) -> Paso, para desactivar los clics de un calendario
+        self._paginas_pdf = []          # v3.9: pestañas que enseñan un PDF (visor de PDF del navegador)
+        self._aviso_visor_pdf = False   # v3.9: ya se avisó de que los botones del visor no se graban
         # Inicio de sesión: id(paso) -> {token, rol, clave, host} de los pasos hechos en un formulario de inicio
         # de sesión; al terminar se juntan en un paso «Iniciar sesión» (ver flujo.agrupar_inicio_sesion).
         self.agrupar_inicio_sesion = agrupar_inicio_sesion
@@ -115,6 +127,13 @@ class GrabadorWeb:
         self.paginas.append(pg)
         pg.on("download", lambda d, pg=pg: self._cola.put(("descarga", pg, d)))
         pg.on("dialog", lambda dlg: self._aceptar_dialogo(dlg))
+        # v3.9: un PDF que se abre en la pestaña (visor de PDF): por su respuesta o, si no se vio (la primera de una
+        # pestaña nueva llega antes de que se registre), mirando qué documento enseña al navegar o al cargar
+        pg.on("response", lambda r, pg=pg: self._cola.put(("pdf", pg, False)) if _respuesta_pdf(r) else None)
+        pg.on("framenavigated", lambda fr, pg=pg: self._cola.put(("pdf", pg, True)) if fr.parent_frame is None else None)
+        pg.on("load", lambda _p, pg=pg: self._cola.put(("pdf", pg, True)))
+        if len(self.paginas) > 1:
+            self._cola.put(("pdf", pg, True))
 
     @staticmethod
     def _aceptar_dialogo(dlg):
@@ -255,6 +274,9 @@ class GrabadorWeb:
                 elif item[0] == "descarga":
                     self._t_evento = None
                     self._procesar_descarga(item[1], item[2])
+                elif item[0] == "pdf":
+                    self._t_evento = None
+                    self._procesar_pdf(item[1], comprobar=item[2])
             except Exception as e:  # un evento raro no debe romper la grabación
                 self.al_evento("estado", texto="Aviso: no se pudo registrar una acción (%s)." % type(e).__name__)
 
@@ -296,6 +318,16 @@ class GrabadorWeb:
         tipo = ev.get("tipo")
         if tipo == "terminar":
             self._parar.set()
+            return
+        if pg is not None and pg in self._paginas_pdf:
+            # v3.9: lo que se pulse en el visor de PDF (p. ej. «Download» o la impresora) no es un paso: esos botones son
+            # del navegador, no de la página.  El PDF ya se guarda solo; para imprimirlo está la casilla del reporte.
+            if not self._aviso_visor_pdf:
+                self._aviso_visor_pdf = True
+                self.al_evento("estado", texto="Los botones de arriba del visor de PDF (guardar, imprimir) son del "
+                                               "navegador, no de la página: no se graban. El PDF ya se guarda solo; si "
+                                               "además lo quieres en papel, marca «Imprimir los PDF que descargue» en "
+                                               "el reporte.")
             return
         pagina = self._indice_pagina(pg)
         marco = self._cadena_marco(frame) if (frame is not None and pg is not None and frame != pg.main_frame) else []
@@ -430,6 +462,39 @@ class GrabadorWeb:
                 self.al_evento("sugerencia", indice=self.flujo.pasos.index(paso), paso=paso,
                                original=valor, plantilla=sugerida)
 
+    def _procesar_pdf(self, pg, comprobar=False):
+        """v3.9: se abrió un PDF en una pestaña (visor de PDF del navegador, sin descarga): el clic que lo abrió pasa a ser
+        «descargar» y, al ejecutar, el bot guarda el PDF de la pestaña.  `comprobar`: se mira si la pestaña enseña un PDF."""
+        if pg in self._paginas_pdf or pg.is_closed():
+            return
+        if comprobar:
+            try:
+                if (pg.url or "about:blank").startswith("about:") or \
+                        pg.evaluate("() => document.contentType") != "application/pdf":
+                    return
+            except Exception:
+                return
+        self._paginas_pdf.append(pg)
+        pagina = self._indice_pagina(pg)
+        pasos = self.flujo.pasos
+        ult = pasos[-1] if pasos else None
+        previas = [p for p in pasos if p.tipo == "descargar" and p is not ult]
+        nombre = mod_flujo.nombre_descarga_defecto(varias=bool(previas))
+        for p in previas:
+            if p.nombre == mod_flujo.NOMBRE_DESCARGA_DEFECTO:
+                p.nombre = mod_flujo.NOMBRE_DESCARGA_VARIAS
+                self._actualizado(p)
+        if ult is not None and ult.tipo == "clic":
+            ult.tipo = "descargar"
+            ult.nombre = nombre
+            ult.nota = "Abre un PDF en una pestaña: el bot guarda ese PDF."
+            self._actualizado(ult)
+        else:
+            self._anadir(Paso("descargar", nombre=nombre, pagina=pagina,
+                              nota="Se abrió un PDF en una pestaña: el bot guarda ese PDF."))
+        self.al_evento("estado", texto="Se abrió un PDF en una pestaña: se guardará como archivo con el nombre del "
+                                       "reporte y la fecha («%s»)." % nombre)
+
     def _procesar_descarga(self, pg, descarga):
         """La descarga se deja completar y se guarda en descargas/grabacion/ (así la web se comporta
         con normalidad y se pueden seguir grabando más descargas).  El paso queda como «descargar»."""
@@ -444,6 +509,10 @@ class GrabadorWeb:
                 guardado = destino
         except Exception:
             guardado = ""
+        if pg in self._paginas_pdf:
+            # v3.9: «Download» del visor de PDF: el PDF ya se guarda con el clic que abrió la pestaña
+            self.al_evento("estado", texto="Descarga del PDF que se abrió en la pestaña: ya se guarda con el paso anterior.")
+            return
         # v3.5: el archivo se llamará como el REPORTE (nombre completo) + la fecha; el nombre que da la web
         # («report_xls», «DetallesVentasMayorista») sigue disponible como {nombre}.  Si el reporte descarga varios
         # archivos, todos llevan además el nombre de la web para no pisarse.

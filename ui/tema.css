@@ -54,6 +54,11 @@
   --info: #1f5fa8;
   --info-suave: rgba(31, 95, 168, .10);
 
+  /* v3.9: el calendario de la fecha del reporte: rojo = «Desde», azul = «Hasta» y los días de en medio */
+  --f-desde: #c62828;
+  --f-hasta: #1565c0;
+  --f-entre: #e3eaf6;
+
   /* Letra */
   --f-titulo: "Bricolage Grotesque", "Bahnschrift", "Segoe UI", sans-serif;
   --f-texto: "Figtree", "Segoe UI", system-ui, sans-serif;

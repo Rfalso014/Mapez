@@ -12,6 +12,7 @@ pruebas los sustituyen (NUNCA se imprime de verdad en las pruebas).
 """
 
 import os
+import re
 
 EXTENSIONES_IMPRIMIR = (".pdf", ".xlsx", ".xls", ".xlsm", ".csv", ".txt", ".doc", ".docx", ".htm", ".html", ".png",
                         ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".gif", ".rtf", ".odt", ".ods", ".xps")
@@ -19,6 +20,30 @@ EXTENSIONES_IMPRIMIR = (".pdf", ".xlsx", ".xls", ".xlsm", ".csv", ".txt", ".doc"
 
 class ErrorImpresion(RuntimeError):
     """No se pudo mandar a imprimir (sin impresora, sin programa para ese tipo de archivo…)."""
+
+
+# v3.9: impresoras que no sacan papel: preguntan dónde guardar el archivo.  Si se usan sin decirles el archivo, Windows
+# abre una ventana «Guardar la salida de impresión como…» y el bot se queda esperando para siempre: se les pasa siempre
+# un archivo de salida (al lado del PDF, con «(impreso)» en el nombre).
+RX_IMPRESORA_A_ARCHIVO = re.compile(r"print to pdf|imprimir en pdf|xps document writer|escritor de documentos xps|"
+                                    r"onenote|pdf24|bullzip|cutepdf|dopdf|pdfcreator|fax", re.IGNORECASE)
+
+
+def imprime_a_un_archivo(impresora):
+    """True si esa impresora guarda un archivo en vez de sacar papel («Microsoft Print to PDF»…)."""
+    return bool(RX_IMPRESORA_A_ARCHIVO.search(str(impresora or "")))
+
+
+def _salida_para(ruta, impresora):
+    """Archivo donde escribe una impresora de las que guardan archivo: al lado del original, «… (impreso).pdf»."""
+    base, _ext = os.path.splitext(os.path.abspath(ruta))
+    nueva = ".xps" if re.search(r"xps", str(impresora or ""), re.IGNORECASE) else ".pdf"
+    destino = base + " (impreso)" + nueva
+    k = 2
+    while os.path.exists(destino):
+        destino = "%s (impreso %d)%s" % (base, k, nueva)
+        k += 1
+    return destino
 
 
 # ------------------------------------------------------------------ lo que toca Windows (las pruebas lo sustituyen)
@@ -94,6 +119,9 @@ def _programa_que_imprime(ext, verbo="print"):
 # PDF»): imprime a ese archivo.
 PS_IMPRIMIR_PDF = r"""
 $ErrorActionPreference = 'Stop'
+$ProgressPreference = 'SilentlyContinue'      # v3.9: sin esto el progreso de PowerShell llega como CLIXML y el mensaje
+$WarningPreference = 'SilentlyContinue'       # de error que veía el usuario era ilegible
+try {
 $ruta = $env:BOTWEB_PDF; $impresora = $env:BOTWEB_IMPRESORA; $salida = $env:BOTWEB_SALIDA
 Add-Type -AssemblyName System.Drawing
 Add-Type -AssemblyName System.Runtime.WindowsRuntime
@@ -133,7 +161,33 @@ $doc.add_PrintPage({ param($s, $e)
   $e.HasMorePages = $script:k -lt $pdf.PageCount })
 $doc.Print()
 Write-Output ('PAGINAS=' + $pdf.PageCount)
+} catch {
+  Write-Output ('ERROR=' + $_.Exception.Message)
+  exit 1
+}
 """
+
+
+def _limpiar_powershell(texto):
+    """v3.9: deja legible lo que escribe PowerShell en el canal de errores (quita el CLIXML del progreso)."""
+    texto = re.sub(r"#<\s*CLIXML", " ", str(texto or ""))
+    texto = re.sub(r"<[^>]{1,400}>", " ", texto, flags=re.S)
+    texto = texto.replace("_x000D_", " ").replace("_x000A_", " ")
+    return re.sub(r"\s+", " ", texto).strip()
+
+
+def _motivo_impresion(texto, impresora):
+    """v3.9: el error de Windows, en español y con qué hacer."""
+    t = _limpiar_powershell(texto)
+    if re.search(r"no existe la impresora|not found|InvalidPrinter|no válida|not valid", t, re.IGNORECASE):
+        return ("Windows no pudo usar la impresora «%s» (puede que esté apagada, desconectada o que haya cambiado de "
+                "nombre). Mírala en Configuración → Impresoras y escáneres." % impresora)
+    if re.search(r"handle is invalid|controlador|driver|spool|cola de impresi", t, re.IGNORECASE):
+        return ("Windows dio un error con la impresora «%s»: comprueba que está encendida y conectada, y que no tiene "
+                "trabajos atascados en la cola." % impresora)
+    if re.search(r"Windows\.Data\.Pdf|PdfDocument|no tiene p|password|contrase", t, re.IGNORECASE):
+        return "El archivo no se pudo leer como PDF (puede estar incompleto o protegido con contraseña)."
+    return "Windows no pudo imprimir en «%s»%s" % (impresora, (": " + t[:200]) if t else "")
 
 
 def _imprimir_pdf_windows(ruta, impresora, salida=None, tiempo=300):
@@ -148,12 +202,18 @@ def _imprimir_pdf_windows(ruta, impresora, salida=None, tiempo=300):
                             "-EncodedCommand", codificado], capture_output=True, text=True, encoding="utf-8",
                            errors="replace", timeout=tiempo, env=entorno,
                            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
-    except (OSError, subprocess.TimeoutExpired) as e:
+    except subprocess.TimeoutExpired:
+        raise ErrorImpresion(
+            "La impresora «%s» no contestó en %d minutos: si es una impresora que guarda un archivo (como «Microsoft "
+            "Print to PDF»), Windows está esperando que alguien diga dónde guardarlo; elige una impresora de papel."
+            % (impresora, max(1, tiempo // 60))) from None
+    except OSError as e:
         raise ErrorImpresion("No se pudo imprimir el PDF con el lector de Windows: %s" % type(e).__name__) from None
-    m = [x for x in (r.stdout or "").splitlines() if x.startswith("PAGINAS=")]
+    lineas = (r.stdout or "").splitlines()
+    m = [x for x in lineas if x.startswith("PAGINAS=")]
     if r.returncode != 0 or not m:
-        detalle = " ".join(l.strip() for l in (r.stderr or r.stdout or "").splitlines() if l.strip())[:300]
-        raise ErrorImpresion("No se pudo imprimir el PDF con el lector de Windows: %s" % (detalle or "error desconocido"))
+        suyo = [x[len("ERROR="):] for x in lineas if x.startswith("ERROR=")]
+        raise ErrorImpresion(_motivo_impresion(suyo[0] if suyo else (r.stderr or r.stdout), impresora))
     return int(m[-1].split("=", 1)[1])
 
 
@@ -196,9 +256,11 @@ _ERRORES = {0: "Windows se quedó sin memoria", 2: "no se encontró el archivo",
             26: "el archivo está abierto en otro programa", 32: "falta una parte del programa que imprime"}
 
 
-def imprimir_archivo(ruta, impresora="", log=None):
+def imprimir_archivo(ruta, impresora="", log=None, salida=None):
     """Manda `ruta` a imprimir.  `impresora` vacío = la predeterminada.  Devuelve el nombre de la impresora usada.
-    Lanza ErrorImpresion con un mensaje que se entiende (en español) si no hay impresora o programa para imprimirlo."""
+    Lanza ErrorImpresion con un mensaje que se entiende (en español) si no hay impresora o programa para imprimirlo.
+    v3.9: con una impresora que guarda un archivo («Microsoft Print to PDF»…) se le dice dónde guardarlo (`salida`, o
+    uno al lado del original): si no, Windows se queda esperando en una ventana que nadie ve."""
     log = log or (lambda texto: None)
     ruta = os.path.abspath(ruta or "")
     if not os.path.isfile(ruta):
@@ -226,12 +288,24 @@ def imprimir_archivo(ruta, impresora="", log=None):
                     "archivo." % (ext or "sin extensión", nombre))
     usar_printto = bool(pedida) and pedida != defecto
     verbo = "printto" if usar_printto else "print"
-    if not _programa_que_imprime(ext, verbo):
-        if ext == ".pdf":                      # Windows trae su propio lector de PDF: se imprime con él
-            paginas = _imprimir_pdf_windows(ruta, destino)
+    a_archivo = imprime_a_un_archivo(destino)
+    if ext == ".pdf" and (a_archivo or not _programa_que_imprime(ext, verbo)):
+        # Windows trae su propio lector de PDF: se imprime con él (y así se puede decir dónde guardar el archivo)
+        guardar = salida or (_salida_para(ruta, destino) if a_archivo else None)
+        paginas = _imprimir_pdf_windows(ruta, destino, salida=guardar)
+        if guardar:
+            log("«%s» se imprimió en «%s»: %d página%s en %s" % (
+                nombre, destino, paginas, "" if paginas == 1 else "s", guardar))
+        else:
             log("enviado a la impresora «%s»: %s (%d página%s, con el lector de PDF de Windows)" % (
                 destino, nombre, paginas, "" if paginas == 1 else "s"))
-            return destino
+        return destino
+    if a_archivo:
+        raise ErrorImpresion(
+            "La impresora «%s» no saca papel: pregunta dónde guardar el archivo, y eso el bot no lo puede contestar. "
+            "Con archivos %s elige una impresora de papel (impresoras: %s)." % (
+                destino, ext or "sin extensión", ", ".join("«%s»" % x for x in lista)))
+    if not _programa_que_imprime(ext, verbo):
         if not _programa_que_imprime(ext, "print"):
             raise ErrorImpresion(sin_programa)
         raise ErrorImpresion("El programa que imprime los archivos %s no deja elegir la impresora. Quita la impresora del "

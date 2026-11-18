@@ -13,6 +13,7 @@ import os
 import shutil
 import sys
 import tempfile
+import time
 import unittest
 
 RAIZ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -217,7 +218,7 @@ class TestInterfaz(Base):
         pg = self.navegador()
         pg.goto(self.srv.url_con_token(), wait_until="load")
         pg.wait_for_selector(".guia-globo", timeout=15000)
-        self.assertEqual(self.recorrer_guia(pg), ["Empieza aquí", "Con un clic lo bajas", "Elige de qué fecha", "Que se haga solo"])
+        self.assertEqual(self.recorrer_guia(pg), ["Empieza aquí", "Con un clic lo bajas", "Mira cómo está", "Todo en un sitio"])
         pg.wait_for_selector("#guia", state="detached")
         pg.wait_for_function("() => true")
         fin = 0
@@ -234,7 +235,7 @@ class TestInterfaz(Base):
         pg.goto(self.srv.url_con_token(), wait_until="load")
         pg.wait_for_selector(".guia-globo", timeout=15000)
         pasos = pg.evaluate("() => window.__botGuia.pasos().map((p) => p.sel)")
-        self.assertEqual(pasos, ['[data-guia="nuevo"]', ".fila-rep [data-ejecutar]", "[data-chip-fecha]", "[data-programar]"])
+        self.assertEqual(pasos, ['[data-guia="nuevo"]', ".fila-rep [data-ejecutar]", "[data-estado-prog]", "[data-programar]"])
         pg.click("[data-guia-saltar]")
         pg.wait_for_selector("#guia", state="detached")
         pg.click("#contenido [data-ver-guia]")
@@ -363,32 +364,56 @@ class TestInterfaz(Base):
         self.assertIn(hoy.replace(day=15).strftime(fmt), pg.inner_text("[data-fecha-parada='4']"))
         self.assertEqual(self.errores, [])
 
+    def esperar_guardado(self, rid, paso, valor, segundos=10):
+        """Espera a que el reporte guardado tenga ese valor en el paso (la interfaz guarda por su cuenta)."""
+        fin = time.monotonic() + segundos
+        while time.monotonic() < fin:
+            if self.alm.cargar_flujo(rid).pasos[paso].valor == valor:
+                return
+            time.sleep(0.2)
+        self.assertEqual(self.alm.cargar_flujo(rid).pasos[paso].valor, valor)
+
     def test_chip_del_reporte_guarda_la_fecha(self):
+        """v3.9: el chip abre el calendario único (rojo = Desde); un reporte con un solo campo de fecha guarda el día
+        tocado.  (Las tarjetas «hoy / día anterior» ya no existen: ver test_v39_fechas_impresion.)"""
         rid = self.reporte_con_fecha()
         rl = self.alm.guardar(Flujo(nombre="Cortes", url="http://127.0.0.1/", pasos=[
             Paso("abrir_url", url="http://127.0.0.1/"),
             Paso("elegir_opcion", selectores=["#c"], objetivo="Corte", filtro="Corte", estrategia="mas_reciente")]))
         pg = self.navegador()
         pg.goto(self.srv.url_con_token(), wait_until="load")
-        chip = "#contenido [data-chip-fecha='%d']" % rid
+        # v3.9: la fecha se cambia desde «📅 Programar…» → «Elegir las fechas en el calendario…»
+        chip = "#contenido [data-estado-prog='%d']" % rid
         pg.wait_for_selector(chip, timeout=15000)
-        self.assertIn("Fecha: el día de hoy", pg.inner_text(chip))
-        pg.click(chip)
-        pg.click(".modal [data-opcion-fecha='ayer']")
+        self.assertIn("Sin programar", pg.inner_text(chip))
+        hoy = datetime.date.today()
+        ayer = hoy - datetime.timedelta(days=1)
+        pg.click("#contenido [data-programar='%d']" % rid)
+        pg.wait_for_selector(".modal [data-cm-calendario]", timeout=15000)
+        pg.click(".modal [data-cm-calendario]")
+        pg.wait_for_selector(".modal [data-calendario-rango]")
+        self.assertEqual(pg.inner_text(".modal [data-ahora-baja]"), "Ahora baja: el día de hoy (cada día cambia)")
+        if ayer.month != hoy.month:
+            pg.click(".modal [aria-label='Mes anterior']")
+        pg.click(".modal [data-dia='%s']" % ayer.isoformat())
         pg.click(".modal .pie button:has-text('Guardar la fecha')")
-        pg.wait_for_function("s => document.querySelector(s).textContent.includes('el día anterior')", arg=chip, timeout=10000)
-        self.assertEqual(self.alm.cargar_flujo(rid).pasos[1].valor, "{ayer:%d/%m/%Y}")
-        # la lista «la más reciente» no se convierte hasta que se elige
-        chip2 = "#contenido [data-chip-fecha='%d']" % rl
-        self.assertIn("la más reciente", pg.inner_text(chip2))
+        pg.wait_for_selector(".modal [data-calendario-rango]", state="detached", timeout=15000)
+        self.esperar_guardado(rid, 1, ayer.strftime("%d/%m/%Y"))
+        self.assertTrue(self.alm.versiones(rid))                                    # con su copia anterior
+        # la lista «la más reciente» no se convierte hasta que se elige un día
         self.assertEqual(self.alm.cargar_flujo(rl).pasos[1].estrategia, "mas_reciente")
-        pg.click(chip2)
-        self.assertEqual(pg.get_attribute(".modal [data-opcion-fecha='reciente']", "aria-pressed"), "true")
-        pg.click(".modal [data-opcion-fecha='hoy']")
+        pg.click("#contenido [data-programar='%d']" % rl)
+        pg.wait_for_selector(".modal [data-cm-calendario]", timeout=15000)
+        pg.click(".modal [data-cm-calendario]")
+        pg.wait_for_selector(".modal [data-calendario-rango]")
+        self.assertTrue(pg.is_checked(".modal [data-mas-reciente]"))
+        pg.click(".modal [data-dia='%s']" % hoy.isoformat())
+        self.assertFalse(pg.is_checked(".modal [data-mas-reciente]"))
         pg.click(".modal .pie button:has-text('Guardar la fecha')")
-        pg.wait_for_function("s => document.querySelector(s).textContent.includes('el día de hoy')", arg=chip2, timeout=10000)
+        pg.wait_for_selector(".modal [data-calendario-rango]", state="detached", timeout=15000)
+        self.esperar_guardado(rl, 1, hoy.strftime("%d/%m/%Y"))
         p = self.alm.cargar_flujo(rl).pasos[1]
-        self.assertEqual((p.estrategia, p.valor), ("por_fecha", "{hoy:%d/%m/%Y}"))
+        self.assertEqual((p.estrategia, p.valor), ("por_fecha", hoy.strftime("%d/%m/%Y")))
         self.assertEqual(self.errores, [])
 
     def test_tren_en_la_barra_de_trabajo(self):

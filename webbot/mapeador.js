@@ -300,6 +300,107 @@
     if (p && p.querySelector('.fa-calendar, .glyphicon-calendar, .bi-calendar, .mdi-calendar, [class*=calendar]')) return true;
     return /^\d{1,4}[\/\-.]\d{1,2}[\/\-.]\d{1,4}$/.test(e.value || '');
   }
+  // v3.9: lista hecha a mano (portal de Pagos: «Localidad»): un recuadro que se pulsa, que enseña lo elegido, y dentro
+  // una lista OCULTA de filas (<li>/<div>) con un radio o una casilla OCULTOS en cada una (y a veces una cabecera de
+  // grupo y un buscador).  No tiene <select>, ni role=listbox/combobox, ni aria-haspopup: ninguna regla la encontraba.
+  // Para no confundirla con los menús de la web ni con los grupos de botones se piden TODAS estas señales:
+  //   1) 2 o más filas, cada una con un radio o una casilla ocultos y todos con el mismo name (o id);
+  //   2) la lista está cerrada (no se ve) o tiene aspecto de desplegable por su clase/id;
+  //   3) hay un recuadro visible que la contiene (o que la señala con aria-controls/aria-owns) y que NO tiene ningún
+  //      otro control a la vista: solo enseña lo elegido;
+  //   4) el recuadro no está en una barra de navegación ni en una cabecera;
+  //   5) algo guarda lo elegido: un campo oculto con ese mismo nombre, o el texto del recuadro es una de las filas.
+  const RX_PANEL_LISTA = /dropdown|drop-?down|menu|popup|popover|select|combo|list|lista|panel|overlay|flyout/i;
+  const SEL_FILA_OPCION = 'li, tr, [role=option], .dropdown-item, .list-group-item, label';
+  const SEL_CONTROL_VISIBLE = 'input:not([type=hidden]), select, textarea, button, a[href], [role=button], [role=combobox], [role=tab]';
+  function ancestroComun(nodos) {
+    let a = nodos[0];
+    for (const n of nodos) { while (a && !a.contains(n)) a = a.parentElement; if (!a) return null; }
+    return a;
+  }
+  function soloEnsenaElValor(caja, panel) {
+    for (const c of caja.querySelectorAll(SEL_CONTROL_VISIBLE)) {
+      if (c === panel || panel.contains(c)) continue;
+      if (visible(c)) return false;
+    }
+    return true;
+  }
+  function textoFueraDelPanel(caja, panel) {
+    const trozos = [];
+    for (const ch of caja.childNodes) {
+      if (ch.nodeType === 3) { trozos.push(ch.textContent); continue; }
+      if (ch.nodeType !== 1 || ch === panel || ch.contains(panel) || panel.contains(ch)) continue;
+      trozos.push(ch.innerText || ch.textContent);
+    }
+    return norm(trozos.join(' '));
+  }
+  function campoDelValor(caja, nombre) {
+    for (let n = caja, k = 0; n && k < 4 && n !== document.body; n = n.parentElement, k++) {
+      for (const i of n.querySelectorAll('input:not([type=radio]):not([type=checkbox])')) {
+        if ((i.getAttribute('name') || '') === nombre || i.id === nombre) return i;
+      }
+    }
+    return null;
+  }
+  // La etiqueta del recuadro NO puede salir de dentro de la lista (allí están el «Buscar:» y las propias filas).
+  function etiquetaDeCaja(caja, campo) {
+    let t = util(caja.getAttribute('aria-label'));
+    if (!t && caja.getAttribute('aria-labelledby')) {
+      t = util(caja.getAttribute('aria-labelledby').split(/\s+/).map((i) => { const l = document.getElementById(i); return l ? l.textContent : ''; }).join(' '));
+    }
+    if (!t && campo && campo.id) { try { const l = document.querySelector('label[for="' + cssEsc(campo.id) + '"]'); if (l) t = util(l.innerText || l.textContent); } catch (e) {} }
+    if (!t) t = etiquetaDeCelda(caja);
+    if (!t) t = textoAnterior(caja);
+    if (!t && campo) t = humanizar(campo.getAttribute('name')) || humanizar(campo.id);
+    if (!t) t = humanizar((caja.id || '').replace(/label$|box$|span$/i, ''));
+    return (t || '').replace(/[:*]+$/, '').trim().slice(0, 80);
+  }
+  function listasDeFilasOcultas(raiz) {
+    const grupos = new Map();
+    let inputs = [];
+    try { inputs = Array.from(raiz.querySelectorAll('input[type=radio], input[type=checkbox]')); } catch (e) { return []; }
+    for (const i of inputs) {
+      if (visible(i)) continue;                 // una casilla que se ve ya la mapea la regla de siempre
+      const nombre = i.getAttribute('name') || i.id || '';
+      if (!nombre) continue;
+      if (!grupos.has(nombre)) grupos.set(nombre, []);
+      grupos.get(nombre).push(i);
+    }
+    const res = [];
+    for (const [nombre, ins] of grupos) {
+      if (ins.length < 2) continue;
+      const filas = [];
+      for (const i of ins) {
+        const f = i.closest(SEL_FILA_OPCION) || i.parentElement;
+        if (f && filas.indexOf(f) < 0) filas.push(f);
+      }
+      if (filas.length < 2) continue;
+      const panel = ancestroComun(filas);
+      if (!panel || panel === document.body || panel === document.documentElement || !raiz.contains(panel)) continue;
+      // (2) cerrada, o abierta pero con aspecto de desplegable (un grupo de botones a la vista no vale)
+      if (visible(panel) && !RX_PANEL_LISTA.test(claseDe(panel) + ' ' + (panel.id || ''))) continue;
+      let caja = null;
+      for (let n = panel.parentElement, k = 0; n && k < 4 && n !== document.body; n = n.parentElement, k++) {
+        if (visible(n)) { caja = n; break; }
+      }
+      if (!caja && panel.id) {                  // la lista cuelga de <body>: el recuadro la señala con aria
+        try { caja = document.querySelector('[aria-controls="' + cssEsc(panel.id) + '"], [aria-owns="' + cssEsc(panel.id) + '"]'); } catch (e) { caja = null; }
+        if (caja && !visible(caja)) caja = null;
+      }
+      if (!caja || !raiz.contains(caja) || caja === document.body) continue;
+      if (caja.matches('nav, header, [role=navigation], [role=menubar], form, table, tbody, tr') ||
+          caja.closest('nav, header, [role=navigation], [role=menubar], .navbar, .main-header, .main-sidebar, .sidebar')) continue;
+      if (!soloEnsenaElValor(caja, panel)) continue;
+      const valor = textoFueraDelPanel(caja, panel);
+      if (valor.length > 100) continue;
+      const campo = campoDelValor(caja, nombre);
+      const textos = filas.map((f) => norm(f.innerText || f.textContent)).filter(Boolean);
+      if (!campo && (!valor || textos.indexOf(valor) < 0)) continue;      // (5) nada guarda lo elegido
+      res.push({ caja, panel, filas, campo, inputs: ins, nombre, valor });
+    }
+    return res;
+  }
+
   function describir(el) {
     if (!el || !el.tagName) return String(el);
     let d = el.tagName.toLowerCase();
@@ -424,6 +525,16 @@
           anotar(dx.caja, { tipo: 'lista', etiqueta: etiquetaDeLista(etiquetaDe(e, dx.caja), e.value || '', dx.opciones), valor: norm(e.value || ''), dx: 'combo',
             opciones: dx.opciones.length ? dx.opciones : null });
         }
+      });
+    }
+    // v3.9: listas hechas a mano (recuadro + lista oculta de filas con radios/casillas ocultos): ver listasDeFilasOcultas
+    for (const g of listasDeFilasOcultas(raiz)) {
+      intentar(g.caja, () => {
+        if (!dentro(g.caja) || ya(g.caja)) return;
+        usados.add(g.caja);
+        if (g.campo) usados.add(g.campo);
+        anotar(g.caja, { tipo: 'lista', etiqueta: etiquetaDeLista(etiquetaDeCaja(g.caja, g.campo), g.valor, null),
+          valor: g.valor, opciones: null, lista_filas: true });
       });
     }
     // listas propias (Vuetify, combobox…): se marca el envoltorio y se abre su recuadro

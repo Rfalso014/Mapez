@@ -109,6 +109,7 @@
     enlace: 'M14 4h6v6M20 4l-9 9M18 14v6H4V6h6',
     cargando: 'M12 3a9 9 0 1 0 9 9',
     rayo: 'M13 3 5 14h6l-1 7 8-11h-6z',
+    impresora: 'M7 9V4h10v5M7 17H4v-8h16v8h-3M7 14h10v6H7z',
   };
   const RELLENOS = new Set(['play', 'parar']);
   const SVG = 'http://www.w3.org/2000/svg';
@@ -443,6 +444,9 @@
     if (m && (m[2] === undefined || formatoValido(m[2]))) return { modo: 'relativa', que: m[1], n: null, formato: m[2] === undefined ? null : m[2] };
     m = /^\{dias:\s*([+-]?\d+)\s*(?::([^{}]+))?\}$/.exec(s);
     if (m && (m[2] === undefined || formatoValido(m[2]))) return { modo: 'relativa', que: 'dias', n: parseInt(m[1], 10), formato: m[2] === undefined ? null : m[2] };
+    // v3.9: {dia_mes_anterior:15} = el día 15 del mes anterior (si no existe, su último día)
+    m = /^\{dia_mes_anterior:\s*(\d{1,2})\s*(?::([^{}]+))?\}$/.exec(s);
+    if (m && +m[1] >= 1 && +m[1] <= 31 && (m[2] === undefined || formatoValido(m[2]))) return { modo: 'relativa', que: 'dia_mes_anterior', n: parseInt(m[1], 10), formato: m[2] === undefined ? null : m[2] };
     if (s === t && !/[{}]/.test(s)) {
       for (const f of FORMATOS_FIJA) {
         const d = leerConFormato(s, f);
@@ -462,6 +466,7 @@
       return s === null ? null : s.replace(/\{/g, '{{').replace(/\}/g, '}}');
     }
     if (a.que === 'dias') return '{dias:' + (parseInt(a.n, 10) || 0) + (f ? ':' + f : '') + '}';
+    if (a.que === 'dia_mes_anterior') return '{dia_mes_anterior:' + (parseInt(a.n, 10) || 1) + (f ? ':' + f : '') + '}';
     return '{' + a.que + (f ? ':' + f : '') + '}';
   }
   function fechaRelativa(que, n, hoy) {
@@ -474,6 +479,7 @@
       case 'fin_mes': return new Date(y, mes + 1, 0);
       case 'inicio_mes_anterior': return new Date(y, mes - 1, 1);
       case 'fin_mes_anterior': return new Date(y, mes, 0);
+      case 'dia_mes_anterior': { const fin = new Date(y, mes, 0); return new Date(fin.getFullYear(), fin.getMonth(), Math.min(parseInt(n, 10) || 1, fin.getDate())); }
       case 'lunes_semana': return lunesDe(d);
       case 'lunes_semana_anterior': return sumarDias(lunesDe(d), -7);
       case 'domingo_semana_anterior': return sumarDias(lunesDe(d), -1);
@@ -497,6 +503,7 @@
   function palabrasFecha(a) {
     if (a.modo === 'fija') return 'fecha fija';
     if (a.modo !== 'relativa') return '';
+    if (a.que === 'dia_mes_anterior') return 'día ' + a.n + ' del mes anterior';
     if (a.que !== 'dias') return PALABRAS_FECHA[a.que] || a.que;
     const n = parseInt(a.n, 10) || 0;
     if (n === 0) return 'hoy';
@@ -1063,6 +1070,7 @@
         E.trabajo = Object.assign(E.trabajo && E.trabajo.id === ev.trabajo ? E.trabajo : {},
           { id: ev.trabajo, estado: ev.estado, descripcion: ev.descripcion, tipo: ev.tipo_trabajo, texto: ev.estado === 'en_curso' ? 'Empezando…' : ev.resumen });
         if (ev.estado === 'en_curso' && !E.trabajo._t0) E.trabajo._t0 = Date.now();      // v3.7: «lleva 1:23»
+        if (ev.estado === 'en_curso' && E.descargas && E.descargas.trabajo !== ev.trabajo) { E.descargas = null; pintarDescargas(); }   // v3.9
         if (ev.estado === 'en_curso') {
           if (ev.reporte_id) { E.trabajoReporte[ev.trabajo] = ev.reporte_id; cursoPoner(ev.reporte_id, { trabajo: ev.trabajo, pct: 4, texto: 'Empezando…', optimista: false }); }
         } else {
@@ -1112,6 +1120,7 @@
       case 'acceso_probado': toast(ev.texto, ev.ok ? 'ok' : 'error', 9000); break;
       case 'correo': refrescarCampana(); break;          // v3.4: resultado de revisar una búsqueda de correo
       case 'actualizacion': pintarActualizacion(ev.info); break;   // v3.9: hay otra versión en GitHub
+      case 'descargas': E.descargas = ev; pintarDescargas(); break;   // v3.9: la lista de lo que se baja
       case 'externo': {                                  // v3.7: lo que ejecutan las tareas de Windows (con su progreso)
         const antes = new Map((E.externos || []).map((x) => [x.id, x]));
         E.externos = ev.lista || [];
@@ -1419,41 +1428,524 @@
     abrirModal({ titulo: opc.titulo || '¿De qué fecha lo quieres?', ancho: true, contenido: h('div', { 'data-modal-fecha': '1' }, sel.caja),
       botones: [{ texto: 'Cancelar', accion: cerrarModal }, { texto: 'Aceptar', clase: 'primario', accion: () => { const v = sel.leer().valor; cerrarModal(); opc.alAceptar(v); } }] });
   }
-  // El chip «Fecha: …» de un reporte; al guardar queda en el reporte (con su versión anterior guardada)
-  function chipFecha(x) {
-    const fs = x.fechas || [];
-    if (!fs.length) return null;
-    const texto = fs.length === 1 ? fechaEnChip(fs[0]) : fs.map((f) => f.nombre + ': ' + fechaEnChip(f)).join(' · ');
-    return h('button', { type: 'button', class: 'chip-fecha', 'data-chip-fecha': String(x.id), 'aria-label': 'Cambiar la fecha de ' + x.nombre, onclick: () => modalFechaReporte(x) }, ico('calendario'), 'Fecha: ' + texto);
+  // ------------------------------------------------------------------ v3.9: la fecha del reporte con UN calendario
+  // Rojo = «Desde», azul = «Hasta» (si el reporte tiene un solo campo de fecha, solo rojo).  El primer toque pone el
+  // Desde, el segundo el Hasta y el tercero empieza otra vez.  El bot pone la roja en el campo «desde» del reporte y la
+  // azul en el «hasta» (lo decide el servidor por el nombre o el orden; aquí se pueden cambiar).  Lo que ya tenía el
+  // reporte ({hoy}, {inicio_mes_anterior}…) se explica en palabras y se enseña en el calendario como si se ejecutara hoy:
+  // solo se cambia si se eligen fechas (o «cada mes») y se guarda.
+  const fmtDia = (d) => strfFecha(d, '%d/%m/%Y');
+  const ultimoDia = (d) => new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+  const mismoDia = (a, b) => !!a && !!b && isoDia(a) === isoDia(b);
+  function camposConRol(campos) {
+    const de = (r) => (campos || []).find((c) => c.rol === r) || null;
+    return { desde: de('desde') || de('unica'), hasta: de('hasta'), unica: !!de('unica'), otras: (campos || []).filter((c) => c.rol === 'otra') };
   }
-  function modalFechaReporte(x) {
-    const partes = x.fechas.map((f) => ({ f, sel: selectorFecha({ valor: f.valor, formato: f.formato || null, lista: f.lista, masReciente: f.lista && f.estrategia === 'mas_reciente' }) }));
-    const zona = h('div');
-    let actual = 0;
-    const pestanas = h('div', { class: 'sf-pestanas', role: 'group', 'aria-label': 'Qué fecha cambiar' });
+  function cadaCuanto(q) {
+    if (['hoy', 'ayer', 'dias', 'fecha'].includes(q)) return 'cada día cambia';
+    if (/mes/.test(q)) return 'cada mes';
+    if (/semana/.test(q)) return 'cada semana';
+    if (/quincena/.test(q)) return 'cada quincena';
+    if (q === 'inicio_anio') return 'cada año';
+    return 'cambia sola';
+  }
+  // Lo que baja ahora el reporte, en palabras: {corto, texto, desde, hasta, relativa, masReciente}
+  function describirFechas(campos, opc) {
+    opc = opc || {};
+    const hoy = opc.hoy || soloDia(new Date());
+    const rep = opc.repetir || null;
+    if (rep) {
+      const d = deIso(rep.desde), hh = deIso(rep.hasta);
+      const que = rep.modo === 'meses' ? 'mes' : (rep.modo === 'quincenas' ? 'quincena' : 'día');
+      if (rep.rango === 'anterior') {
+        const t = (rep.modo === 'meses' ? 'el mes' : 'la quincena') + ' que acaba de terminar';
+        return { corto: t, texto: t + ' (cada vez que se ejecute)', desde: d, hasta: hh, relativa: true };
+      }
+      const t = d && hh ? 'del ' + fmtDia(d) + ' al ' + fmtDia(hh) : 'sin elegir';
+      const n = rep.n || 0;
+      return { corto: t, texto: t + ' (un archivo por ' + que + (n ? ': ' + n + ' en total' : '') + ')', desde: d, hasta: hh, relativa: rep.modo !== 'fijo' && rep.modo !== 'meses' && rep.modo !== 'quincenas' };
+    }
+    const r = camposConRol(campos);
+    if (!r.desde) return { corto: 'sin elegir', texto: 'sin elegir', desde: null, hasta: null };
+    if (r.desde.lista && r.desde.estrategia === 'mas_reciente') return { corto: 'la más reciente', texto: 'la más reciente que haya', desde: null, hasta: null, masReciente: true };
+    const a = analizarFecha(r.desde.valor);
+    const b = r.hasta && !(r.hasta.lista && r.hasta.estrategia === 'mas_reciente') ? analizarFecha(r.hasta.valor) : null;
+    let d = fechaDe(a, hoy);
+    let hh = b ? fechaDe(b, hoy) : null;
+    const q = (x) => (!x ? '' : (x.modo === 'fija' ? 'fija' : (x.modo !== 'relativa' ? x.modo
+      : (x.que === 'dias' ? ({ 0: 'hoy', '-1': 'ayer' }[String(parseInt(x.n, 10) || 0)] || 'dias') : x.que))));
+    const qa = q(a), qb = q(b);
+    const palabra = (x, f) => (x.modo === 'fija' ? fmtDia(f) : palabrasFecha(x));
+    const solo = !b || (qa === qb && (qa !== 'fija' || mismoDia(d, hh)) && (!['dias', 'dia_mes_anterior'].includes(qa) || +a.n === +b.n));
+    let corto, cada = '';
+    if (solo) {
+      if (qa === 'hoy') { corto = 'el día de hoy'; cada = 'cada día cambia'; }
+      else if (qa === 'ayer') { corto = 'el día anterior'; cada = 'cada día cambia'; }
+      else if (qa === 'fija') { corto = 'el ' + fmtDia(d); cada = 'siempre la misma'; }
+      else if (qa === 'vacia') corto = 'sin elegir';
+      else if (qa === 'mano') corto = 'escrita a mano («' + r.desde.valor + '»)';
+      else { corto = 'el ' + palabrasFecha(a); cada = cadaCuanto(qa); }
+      hh = d;
+    } else if (qa === 'inicio_mes_anterior' && qb === 'fin_mes_anterior') { corto = 'el mes anterior'; cada = 'cada mes'; }
+    else if (['inicio_mes_anterior', 'dia_mes_anterior'].includes(qa) && ['fin_mes_anterior', 'dia_mes_anterior'].includes(qb)) {
+      corto = 'del día ' + (qa === 'dia_mes_anterior' ? a.n : 1) + ' al ' + (qb === 'fin_mes_anterior' ? 'último día' : 'día ' + b.n) + ' del mes anterior'; cada = 'cada mes';
+    } else if (qa === 'inicio_mes' && qb === 'fin_mes') { corto = 'este mes'; cada = 'cada mes'; }
+    else if (qa === 'inicio_mes' && (qb === 'hoy' || qb === 'ayer')) { corto = 'desde el día 1 de este mes hasta ' + qb; cada = 'cada día cambia'; }
+    else if (qa === 'lunes_semana_anterior' && qb === 'domingo_semana_anterior') { corto = 'la semana pasada'; cada = 'cada semana'; }
+    else if (qa === 'inicio_quincena_anterior' && qb === 'fin_quincena_anterior') { corto = 'la quincena anterior'; cada = 'cada quincena'; }
+    else if (qa === 'fija' && qb === 'fija') { corto = 'del ' + fmtDia(d) + ' al ' + fmtDia(hh); cada = 'siempre las mismas fechas'; }
+    else if (d && hh) { corto = 'desde ' + palabra(a, d) + ' hasta ' + palabra(b, hh); cada = 'cambia sola cada vez'; }
+    else corto = 'escrita a mano';
+    if (d && hh && hh < d) [d, hh] = [hh, d];
+    return { corto, texto: corto + (cada ? ' (' + cada + ')' : ''), desde: d, hasta: hh, relativa: qa !== 'fija' || (b && qb !== 'fija') };
+  }
+  // «Descargar en esta fecha cada mes»: la fecha elegida → la misma del mes anterior al día en que se ejecuta (como
+  // plantillas.plantilla_cada_mes: día 1 = inicio, último día de su mes = fin, otro día N = el N, o el último si no hay)
+  function mismaDelMesAnterior(dia, cuando) {
+    const fin = new Date(cuando.getFullYear(), cuando.getMonth(), 0);
+    if (dia.getDate() === 1) return new Date(fin.getFullYear(), fin.getMonth(), 1);
+    if (dia.getDate() === ultimoDia(dia)) return fin;
+    return new Date(fin.getFullYear(), fin.getMonth(), Math.min(dia.getDate(), fin.getDate()));
+  }
+  async function modalFechaReporte(x) {
+    let r;
+    try { r = await api('GET', 'reportes/' + x.id + '/fechas'); } catch (e) { errorToast(e); return; }
+    const hoy = deIso(r.hoy) || soloDia(new Date());
+    const roles = camposConRol(r.campos);
+    const rep = r.repetir || null;
+    const porPeriodos = !!rep && (rep.modo === 'meses' || rep.modo === 'quincenas');
+    const unica = !rep && roles.unica;                       // un solo campo de fecha: solo la fecha roja
+    const actual = describirFechas(r.campos, { hoy, repetir: rep });
+    let desde = actual.desde, hasta = unica ? null : actual.hasta;
+    let esperandoHasta = false, cambiadas = false, invertir = false;
+    const hayListas = !rep && r.campos.some((c) => c.lista);
+    let masReciente = !!actual.masReciente;
+    const cm0 = r.cada_mes || {};
+    let vista = new Date((desde || hoy).getFullYear(), (desde || hoy).getMonth(), 1);
+    const casillaMes = h('input', { type: 'checkbox', 'data-cada-mes': '1', checked: !!cm0.programado });
+    const horaMes = h('input', { type: 'time', value: cm0.hora || '07:00', 'aria-label': 'A qué hora', 'data-cada-mes-hora': '1' });
+    casillaMes.addEventListener('change', () => pintar());
+    horaMes.addEventListener('change', () => pintar());
+    horaMes.addEventListener('input', () => pintarMes());
+    const casillaReciente = h('input', { type: 'checkbox', 'data-mas-reciente': '1', checked: masReciente });
+    casillaReciente.addEventListener('change', () => { masReciente = casillaReciente.checked; if (masReciente) cambiadas = false; pintar(); });
+    const caja = h('div', { class: 'rc', 'data-calendario-rango': String(x.id) });
+    const zonaMes = h('div', { class: 'rc-mes', 'data-zona-cada-mes': '1' });
+    const diasDeLaSemana = ['Lu', 'Ma', 'Mi', 'Ju', 'Vi', 'Sá', 'Do'];
+
+    function clicDia(d) {
+      cambiadas = true;
+      masReciente = false;
+      casillaReciente.checked = false;
+      if (unica) { desde = d; hasta = null; }
+      else if (!esperandoHasta) { desde = d; hasta = null; esperandoHasta = true; }
+      else { if (d < desde) { hasta = desde; desde = d; } else hasta = d; esperandoHasta = false; }
+      pintar();
+    }
+    function textoResumen() {
+      if (masReciente) return 'Bajará la más reciente que haya';
+      if (!desde) return 'Toca un día del calendario';
+      if (esperandoHasta) return 'Desde el ' + fmtDia(desde) + ': ahora toca el día «Hasta»';
+      const fin = hasta || desde;
+      const t = mismoDia(desde, fin) ? 'Bajará el ' + fmtDia(desde) : 'Bajará del ' + fmtDia(desde) + ' al ' + fmtDia(fin);
+      return t + (!cambiadas && actual.relativa ? ' (si se ejecuta hoy)' : '');
+    }
+    // ¿Se puede «cada mes» con lo elegido?  null = sí; si no, el motivo
+    function motivoSinMes() {
+      if (rep && !porPeriodos) return 'Este reporte se repite por días: para bajarlo cada mes, en el editor elige «Repetir: por meses».';
+      if (masReciente) return 'Con «la más reciente» no hace falta: baja siempre la última que haya.';
+      if (!rep && desde && hasta && (desde.getFullYear() !== hasta.getFullYear() || desde.getMonth() !== hasta.getMonth()))
+        return 'Para bajarlo cada mes, elige el «Desde» y el «Hasta» dentro del mismo mes.';
+      return null;
+    }
+    function explicacionMes() {
+      const hora = horaMes.value || '07:00';
+      if (porPeriodos) {
+        const q = rep.modo === 'quincenas';
+        return 'Cada día 1' + (q ? ' y cada día de corte' : '') + ', a las ' + hora + ', el bot bajará solo ' + (q ? 'la quincena' : 'el mes') + ' que acaba de terminar.';
+      }
+      if (!desde) return '';
+      const fin = hasta || desde;
+      const dd = desde.getDate(), df = fin.getDate();
+      const ult = (d) => d.getDate() === ultimoDia(d);
+      let que;
+      if (unica || mismoDia(desde, fin)) que = 'el día ' + (ult(desde) ? 'último' : dd) + ' del mes anterior';
+      else if (dd === 1 && ult(fin)) que = 'el mes anterior entero (del día 1 al último día)';
+      else que = 'del día ' + dd + ' al ' + (ult(fin) ? 'último día' : 'día ' + df) + ' del mes anterior';
+      const prox = new Date(hoy.getFullYear(), hoy.getMonth() + 1, 1);
+      const a = mismaDelMesAnterior(desde, prox), b = mismaDelMesAnterior(fin, prox);
+      return 'Cada día 1, a las ' + hora + ', el bot bajará solo ' + que + '. Por ejemplo, el ' + fmtDia(prox) + ' bajará ' +
+        (mismoDia(a, b) ? 'el ' + fmtDia(a) : 'del ' + fmtDia(a) + ' al ' + fmtDia(b)) + '.';
+    }
+    function pintarMes() {
+      const motivo = motivoSinMes();
+      casillaMes.disabled = !!motivo;
+      horaMes.disabled = !!motivo || !casillaMes.checked;
+      const activo = casillaMes.checked && !motivo;
+      const hora = horaMes.value || '07:00';
+      const dias = rep && rep.modo === 'quincenas' ? 'los días 1 y de corte' : 'el día 1';
+      let estado = '', clase = 'rc-estado';
+      if (activo && cm0.programado && hora === cm0.hora) estado = cm0.texto || ('Se bajará solo ' + dias + ' de cada mes a las ' + hora);
+      else if (activo) { estado = 'Al guardar: se bajará solo ' + dias + ' de cada mes a las ' + hora + '.'; clase += ' pendiente'; }
+      else if (cm0.programado) { estado = 'Al guardar se quita: ya no se bajará solo cada mes.'; clase += ' pendiente'; }
+      zonaMes.replaceChildren(...[
+        h('div', { class: 'rc-mes-fila' }, h('label', { class: 'rc-mes-cb' }, casillaMes, h('span', null, 'Descargar en esta fecha cada mes')),
+          h('span', { class: 'rc-hora' }, 'a las', horaMes)),
+        motivo ? h('p', { class: 'ayuda', 'data-sin-cada-mes': '1' }, motivo) : h('p', { class: 'ayuda', 'data-explica-cada-mes': '1' }, explicacionMes()),
+        estado ? h('p', { class: clase, 'data-estado-cada-mes': '1' }, estado) : null,
+        activo && cm0.otro_horario ? h('p', { class: 'sf-nota' }, 'Ojo: este reporte ya tiene otro horario (' + cm0.otro_horario + '). Al guardar se cambia por este.') : null].filter(Boolean));
+    }
     function pintar() {
-      pestanas.replaceChildren(...partes.map((p, i) => h('button', { type: 'button', 'aria-pressed': i === actual ? 'true' : 'false', 'data-fecha-paso': String(p.f.paso), onclick: () => { actual = i; pintar(); } }, p.f.nombre)));
-      zona.replaceChildren(partes[actual].sel.caja);
+      const foco = document.activeElement && caja.contains(document.activeElement) ? document.activeElement.getAttribute('data-rc') : null;
+      const fin = masReciente ? null : (hasta || (esperandoHasta ? null : desde));
+      const celdas = [];
+      for (let i = 0; i < (vista.getDay() + 6) % 7; i++) celdas.push(h('span', { class: 'rc-dia nada' }));
+      const n = ultimoDia(vista);
+      for (let k = 1; k <= n; k++) {
+        const d = new Date(vista.getFullYear(), vista.getMonth(), k);
+        const iso = isoDia(d);
+        const esD = !masReciente && mismoDia(d, desde), esH = !unica && !masReciente && mismoDia(d, fin) && !!fin;
+        const entre = !masReciente && desde && fin && d > desde && d < fin;
+        celdas.push(h('button', { type: 'button', class: 'rc-dia' + (esD ? ' desde' : '') + (esH ? ' hasta' : '') + (entre ? ' entre' : '') + (mismoDia(d, hoy) ? ' hoy' : ''),
+          'data-dia': iso, 'data-rc': 'dia-' + iso, 'aria-pressed': esD || esH ? 'true' : 'false',
+          'aria-label': fechaEnPalabras(d) + (esD ? (unica ? ' (la fecha elegida)' : ' (Desde)') : '') + (esH && !esD ? ' (Hasta)' : ''),
+          onclick: () => clicDia(d) }, String(k)));
+      }
+      const mover = (m) => () => { vista = new Date(vista.getFullYear(), vista.getMonth() + m, 1); pintar(); };
+      const selMes = h('select', { 'aria-label': 'Mes', 'data-rc': 'mes', 'data-rc-mes': '1' }, MESES.map((m, i) => h('option', { value: String(i) }, m.charAt(0).toUpperCase() + m.slice(1))));
+      selMes.value = String(vista.getMonth());
+      selMes.addEventListener('change', () => { vista = new Date(vista.getFullYear(), +selMes.value, 1); pintar(); });
+      const a0 = Math.min(hoy.getFullYear() - 6, vista.getFullYear()), a1 = Math.max(hoy.getFullYear() + 1, vista.getFullYear());
+      const anios = [];
+      for (let a = a1; a >= a0; a--) anios.push(a);
+      const selAnio = h('select', { 'aria-label': 'Año', 'data-rc': 'anio', 'data-rc-anio': '1' }, anios.map((a) => h('option', { value: String(a) }, String(a))));
+      selAnio.value = String(vista.getFullYear());
+      selAnio.addEventListener('change', () => { vista = new Date(+selAnio.value, vista.getMonth(), 1); pintar(); });
+      const mapa = !rep && roles.desde && roles.hasta ? (() => {
+        const rojo = invertir ? roles.hasta : roles.desde, azul = invertir ? roles.desde : roles.hasta;
+        return h('div', { class: 'rc-mapa', 'data-mapa-fechas': '1' },
+          h('span', null, h('i', { class: 'm-desde' }), h('span', null, 'La roja va en «', h('b', { 'data-campo-rojo': '1' }, rojo.nombre), '»')),
+          h('span', null, h('i', { class: 'm-hasta' }), h('span', null, 'la azul en «', h('b', { 'data-campo-azul': '1' }, azul.nombre), '»')),
+          boton('Cambiarlas', () => { invertir = !invertir; pintar(); }, 'chico sec', { 'data-intercambiar': '1', 'data-rc': 'cambiar', 'aria-label': 'Cambiar qué campo recibe cada fecha' }),
+          r.por_orden ? h('span', { class: 'ayuda ancho' }, 'Por el nombre no sé cuál es cuál: lo he decidido por el orden. Si está al revés, pulsa «Cambiarlas».') : null);
+      })() : null;
+      caja.replaceChildren(...[
+        rep ? h('p', { class: 'sf-nota', 'data-repite': '1' }, 'Este reporte se repite ' + (rep.modo === 'meses' ? 'por meses' : (rep.modo === 'quincenas' ? 'por quincenas' : 'por días')) +
+          ': elige el primer y el último día; se bajará un archivo por ' + (rep.modo === 'meses' ? 'mes' : (rep.modo === 'quincenas' ? 'quincena' : 'día')) + '.') : null,
+        !cambiadas ? h('p', { class: 'rc-ahora', 'data-ahora-baja': '1' }, 'Ahora baja: ' + actual.texto) : null,
+        h('div', { class: 'rc-cal' + (masReciente ? ' apagado' : '') },
+          h('div', { class: 'rc-cab' },
+            h('button', { type: 'button', class: 'boton chico solo-icono', 'aria-label': 'Mes anterior', 'data-rc': 'mes-a', onclick: mover(-1) }, ico('atras')),
+            selMes, selAnio,
+            h('button', { type: 'button', class: 'boton chico solo-icono cal-sig', 'aria-label': 'Mes siguiente', 'data-rc': 'mes-s', onclick: mover(1) }, ico('atras'))),
+          h('div', { class: 'rc-semana', 'aria-hidden': 'true' }, diasDeLaSemana.map((t) => h('span', null, t))),
+          h('div', { class: 'rc-mes-dias', role: 'group', 'aria-label': MESES[vista.getMonth()] + ' ' + vista.getFullYear() }, celdas),
+          h('div', { class: 'rc-ley' }, h('span', null, h('i', { class: 'm-desde' }), unica ? 'La fecha' : 'Desde'),
+            unica ? null : h('span', null, h('i', { class: 'm-hasta' }), 'Hasta'),
+            unica ? null : h('span', null, h('i', { class: 'm-entre' }), 'Los días de en medio'),
+            h('span', null, h('i', { class: 'm-hoy' }), 'Hoy'))),
+        h('p', { class: 'rc-resumen', 'data-resumen-fecha': '1', 'aria-live': 'polite' }, textoResumen()),
+        h('p', { class: 'ayuda' }, unica ? 'Toca el día que quieres.' : 'Toca un día para el «Desde» (rojo) y otro para el «Hasta» (azul). Un tercer toque empieza otra vez.'),
+        mapa,
+        roles.otras.length ? h('p', { class: 'ayuda' }, 'Este reporte tiene otra fecha (' + roles.otras.map((c) => '«' + c.nombre + '»').join(', ') + ') que aquí no se cambia: se cambia en «Editar pasos».') : null,
+        hayListas ? h('label', { class: 'casilla rc-reciente' }, casillaReciente, ' La más reciente que haya (sin elegir fecha)') : null,
+        zonaMes].filter(Boolean));
+      pintarMes();
+      if (foco) { const el = caja.querySelector('[data-rc="' + foco + '"]'); if (el) el.focus({ preventScroll: true }); }
     }
     pintar();
     const guardar = async () => {
-      const elecciones = {};
-      for (const p of partes) {
-        const v = p.sel.leer();
-        if (!v.cambiado) continue;
-        elecciones[p.f.paso] = p.f.lista ? (v.modo === 'reciente' ? { estrategia: 'mas_reciente', valor: '' } : { estrategia: 'por_fecha', valor: v.valor }) : { estrategia: 'fija', valor: v.valor };
-      }
-      if (!Object.keys(elecciones).length) { cerrarModal(); return; }
+      const activo = casillaMes.checked && !casillaMes.disabled;
+      const hora = horaMes.value || '07:00';
+      const nada = !cambiadas && !invertir && masReciente === !!actual.masReciente && activo === !!cm0.programado && (!activo || hora === cm0.hora);
+      if (nada) { cerrarModal(); return; }
+      if (!masReciente && !desde) { toast('Toca un día del calendario', 'aviso'); return; }
+      const fin = hasta || desde;
       try {
-        await api('POST', 'reportes/' + x.id + '/filtros/predeterminado', { elecciones });
+        const res = await api('POST', 'reportes/' + x.id + '/fechas', { desde: isoDia(desde || hoy), hasta: fin ? isoDia(fin) : null,
+          cambiadas: cambiadas || invertir, invertir, mas_reciente: masReciente, cada_mes: { activo, hora } });
         cerrarModal();
-        toast('Fecha de «' + x.nombre + '» guardada', 'ok');
+        const extra = res.horario === 'creado' ? ' · ' + ((res.cada_mes && res.cada_mes.texto) || 'se bajará solo cada mes') : (res.horario === 'quitado' ? ' · ya no se baja solo cada mes' : '');
+        toast('Fecha de «' + x.nombre + '» guardada' + extra, 'ok', 7000);
         if (E.vista && E.vista.ctl && E.vista.ctl.actualizar) E.vista.ctl.actualizar(true);
       } catch (e) { errorToast(e); }
     };
     abrirModal({ titulo: '¿De qué fecha quieres «' + x.nombre + '»?', ancho: true,
-      contenido: h('div', { 'data-modal-fecha': String(x.id) }, partes.length > 1 ? pestanas : null, zona),
+      contenido: h('div', { 'data-modal-fecha': String(x.id) }, caja),
       botones: [{ texto: 'Cancelar', accion: cerrarModal }, { texto: 'Guardar la fecha', clase: 'primario', accion: guardar }] });
+  }
+
+  // ------------------------------------------------------------------ v3.9: «Imprimir los PDF que descargue»
+  // La casilla y la impresora (vacía = la predeterminada de Windows).  La lista de impresoras se pide al abrirla o al
+  // marcar la casilla (no al pintar: así no se pregunta a Windows sin necesidad).
+  function casillaImprimir(conf, alCambiar) {
+    conf = conf || {};
+    const cb = h('input', { type: 'checkbox', checked: !!conf.activo, 'data-imprimir-pdf': '1' });
+    const sel = h('select', { 'aria-label': 'Impresora', 'data-impresora-pdf': '1' }, h('option', { value: '' }, 'La impresora predeterminada de Windows'),
+      conf.impresora ? h('option', { value: conf.impresora }, conf.impresora) : null);
+    sel.value = conf.impresora || '';
+    let cargadas = false;
+    const cargar = async () => {
+      if (cargadas) return;
+      cargadas = true;
+      let r;
+      try { r = await api('GET', 'impresoras'); } catch (e) { cargadas = false; return; }
+      const valor = sel.value;
+      const lista = (r.impresoras || []).slice();
+      if (valor && !lista.includes(valor)) lista.push(valor);
+      sel.replaceChildren(h('option', { value: '' }, 'La impresora predeterminada de Windows' + (r.predeterminada ? ' (' + r.predeterminada + ')' : '')),
+        ...lista.map((n) => h('option', { value: n }, n)));
+      sel.value = valor;
+    };
+    const act = () => { sel.disabled = !cb.checked; caja.classList.toggle('activa', cb.checked); };
+    cb.addEventListener('change', () => { act(); if (cb.checked) cargar(); if (alCambiar) alCambiar(); });
+    sel.addEventListener('change', () => { if (alCambiar) alCambiar(); });
+    sel.addEventListener('focus', cargar);
+    sel.addEventListener('pointerdown', cargar);
+    const caja = h('div', { class: 'imprimir-pdf', 'data-casilla-imprimir': '1' },
+      h('label', { class: 'casilla imp-cb' }, cb, ico('impresora'), h('span', null, 'Imprimir los PDF que descargue')),
+      h('div', { class: 'imp-en' }, h('span', null, 'en'), sel),
+      h('p', { class: 'ayuda' }, 'Cada PDF se manda a la impresora nada más bajarlo (también el de cada comercio u opción). Los Excel y CSV no se imprimen. Si la impresora falla, el archivo se descarga igual.'));
+    act();
+    if (cb.checked) cargar();
+    return { el: caja, leer: () => ({ activo: cb.checked, impresora: sel.value }), cargar };
+  }
+  // ------------------------------------------------------------------ v3.9: la ventana «Programar» (todo en una)
+  // Reúne lo que antes estaban en cuatro botones de la fila: la fecha, «Descargar todas», imprimir y el horario.
+  const DIAS_SEM = [['lun', 'lunes'], ['mar', 'martes'], ['mie', 'miércoles'], ['jue', 'jueves'], ['vie', 'viernes'],
+                    ['sab', 'sábado'], ['dom', 'domingo']];
+  function textoCuandoJS(c) {
+    if (c.modo === 'mes') return 'Cada mes, día ' + c.dia + ' a las ' + c.hora;
+    if (c.modo === 'dia') return 'Cada día a las ' + c.hora;
+    if (c.modo === 'semana') return 'Cada semana, los ' + (DIAS_SEM.find((d) => d[0] === c.dia_semana) || DIAS_SEM[0])[1] + ' a las ' + c.hora;
+    return 'Sin programar (solo cuando pulses «Ejecutar»)';
+  }
+  function textoResumenCadaMes(v, e) {
+    const n = v.lista && v.lista.opciones ? v.lista.opciones : 0;
+    const que = !v.lista ? 'bajará el reporte'
+      : (e.todas ? (n ? 'bajará las ' + n + ' opciones de «' + v.lista.nombre + '»' : 'bajará todas las opciones de «' + v.lista.nombre + '»')
+        : 'bajará una sola opción de «' + v.lista.nombre + '»');
+    const cuando = e.fechas === 'no_tocar' ? ' con las fechas que tiene puestas'
+      : (e.fechas === 'mismos_dias' && v.fechas.parcial ? ' del día ' + v.fechas.parcial.desde + ' al ' + v.fechas.parcial.hasta + ' del mes anterior'
+        : ' del mes anterior entero');
+    const archivos = (n && e.todas && v.archivos_por_opcion) ? ' (' + (n * v.archivos_por_opcion) + ' archivos)' : '';
+    const imp = e.imprimir.activo ? ' e imprimirá los PDF en «' + (e.imprimir.impresora || 'la impresora de Windows') + '»'
+      : ' y no imprimirá nada';
+    if (e.cuando.modo === 'no') return 'Cuando pulses «Ejecutar», ' + que + cuando + archivos + imp + '.';
+    return textoCuandoJS(e.cuando) + ', ' + que + cuando + archivos + imp + '.';
+  }
+
+  async function modalProgramar(x) {
+    let v;
+    try { v = await api('GET', 'reportes/' + x.id + '/cada_mes'); } catch (e) { errorToast(e); return; }
+    const nombre = v.nombre || x.nombre;
+    // 1) qué baja
+    const cbTodas = h('input', { type: 'checkbox', checked: !v.lista || v.lista.activo || true, 'data-cm-todas': '1' });
+    const lineaLista = v.lista
+      ? h('label', { class: 'casilla' }, cbTodas, h('span', null, 'Todas las opciones de «' + v.lista.nombre + '»' +
+          (v.lista.opciones ? ' (' + v.lista.opciones + ')' : '')))
+      : h('p', { class: 'ayuda' }, 'Este reporte no tiene ninguna lista de opciones (comercios, localidades…). Lo demás sí se puede programar; para bajar por opciones, usa «Mapear página» y trae la lista.');
+    // 2) fechas
+    const radio = (grupo, valor, texto, marcado) => {
+      const r = h('input', { type: 'radio', name: grupo + '-' + x.id, value: valor, checked: !!marcado, 'data-cm-fechas': valor });
+      return { r, el: h('label', { class: 'casilla' }, r, h('span', null, texto)) };
+    };
+    const rMes = radio('cm-fechas', 'mes_completo', v.fechas.mes_completo, true);
+    const rDias = v.fechas.parcial ? radio('cm-fechas', 'mismos_dias', v.fechas.parcial.texto + ' (como lo tienes ahora)') : null;
+    const rNo = radio('cm-fechas', 'no_tocar', 'No tocar las fechas del reporte');
+    const verCalendario = boton('Elegir las fechas en el calendario…', () => { cerrarModal(); modalFechaReporte(x); }, 'chico sec',
+      { 'data-cm-calendario': '1', title: 'Abre el calendario de siempre (fecha roja = desde, azul = hasta)' });
+    const cajaFechas = v.fechas.campos
+      ? h('div', null, rMes.el, rDias ? rDias.el : null, rNo.el,
+          h('p', { class: 'ayuda' }, v.fechas.ejemplo), verCalendario)
+      : h('p', { class: 'ayuda' }, 'Este reporte no tiene campos de fecha: no hay nada que cambiar aquí.');
+    // 3) imprimir
+    const cas = casillaImprimir({ activo: v.imprimir.activo, impresora: v.imprimir.impresora || v.imprimir.sugerida }, () => pintar());
+    const avisoImp = h('p', { class: 'ayuda aviso-imp oculto' });
+    // 4) cuándo
+    const selModo = h('select', { 'aria-label': 'Cada cuánto', 'data-cm-modo': '1' },
+      h('option', { value: 'mes' }, 'Cada mes'), h('option', { value: 'dia' }, 'Cada día'),
+      h('option', { value: 'semana' }, 'Cada semana'), h('option', { value: 'no' }, 'Sin programar'));
+    // por defecto «Cada mes» (es lo que el botón promete); si ya tiene horario, el suyo
+    selModo.value = v.cuando.otro_horario ? 'mes' : ((v.cuando.modo && v.cuando.modo !== 'no') ? v.cuando.modo : 'mes');
+    const inpDia = h('input', { type: 'number', min: '1', max: '28', value: String(v.cuando.dia || 1), class: 'corto',
+      'aria-label': 'Día del mes', 'data-cm-dia': '1' });
+    const selDiaSem = h('select', { 'aria-label': 'Día de la semana', 'data-cm-diasem': '1' },
+      DIAS_SEM.map(([k, n]) => h('option', { value: k }, n)));
+    selDiaSem.value = v.cuando.dia_semana || 'lun';
+    const inpHora = h('input', { type: 'time', value: v.cuando.hora || '07:00', class: 'corto', 'aria-label': 'Hora', 'data-cm-hora': '1' });
+    const etqDia = h('span', null, 'día');
+    const etqHora = h('span', null, 'a las');
+    const avanzadas = boton('Opciones avanzadas…', () => { cerrarModal(); programarReporte(x.id, nombre); }, 'chico sec',
+      { 'data-cm-avanzadas': '1', title: 'Horarios más complicados (varias horas, cada N horas, fechas de inicio y fin, avisos y vista)' });
+    const avisoHorario = v.cuando.otro_horario
+      ? h('div', { class: 'alerta aviso' }, 'Ahora mismo «' + nombre + '» tiene otro horario: ' + v.cuando.otro_horario +
+          '. Si lo dejas programado aquí, se cambia por el que elijas.')
+      : null;
+    const resumen = h('p', { class: 'cm-resumen', 'data-cm-resumen': '1' });
+    const eleccion = () => ({
+      todas: v.lista ? cbTodas.checked : false,
+      fechas: v.fechas.campos ? (rMes.r.checked ? 'mes_completo' : (rDias && rDias.r.checked ? 'mismos_dias' : 'no_tocar')) : 'no_tocar',
+      imprimir: cas.leer(),
+      cuando: { modo: selModo.value, dia: parseInt(inpDia.value, 10) || 1, hora: inpHora.value || '07:00', dia_semana: selDiaSem.value },
+    });
+    const esDeArchivo = (n) => /print to pdf|imprimir en pdf|xps|onenote|pdf24|bullzip|cutepdf|dopdf|pdfcreator|fax/i.test(n || '');
+    function pintar() {
+      const e = eleccion();
+      resumen.textContent = textoResumenCadaMes(v, e);
+      const malaImp = e.imprimir.activo && esDeArchivo(e.imprimir.impresora);
+      avisoImp.classList.toggle('oculto', !malaImp);
+      avisoImp.textContent = malaImp ? 'Ojo: «' + e.imprimir.impresora + '» no saca papel; guarda un archivo al lado de la descarga.' : '';
+      const m = e.cuando.modo;
+      inpDia.classList.toggle('oculto', m !== 'mes');
+      etqDia.classList.toggle('oculto', m !== 'mes');
+      selDiaSem.classList.toggle('oculto', m !== 'semana');
+      inpHora.classList.toggle('oculto', m === 'no');
+      etqHora.classList.toggle('oculto', m === 'no');
+    }
+    [cbTodas, rMes.r, rNo.r, inpDia, inpHora, selModo, selDiaSem].concat(rDias ? [rDias.r] : []).forEach((c) => {
+      c.addEventListener('change', pintar); c.addEventListener('input', pintar);
+    });
+    pintar();
+    const refrescar = () => { if (E.vista && E.vista.ctl && E.vista.ctl.actualizar) E.vista.ctl.actualizar(true); };
+    const guardar = async () => {
+      try {
+        const e = eleccion();
+        const r = await api('POST', 'reportes/' + x.id + '/cada_mes', Object.assign({ confirmar: true }, e));
+        cerrarModal();
+        toast('Listo: ' + textoResumenCadaMes(r, e), 'ok');
+        refrescar();
+      } catch (err) { errorToast(err); }
+    };
+    // «Ejecutar ahora»: lo baja YA con lo que hay elegido en la ventana, sin tocar los pasos guardados
+    const ejecutarAhora = async () => {
+      const e = eleccion();
+      const n = v.lista && e.todas && v.lista.opciones ? v.lista.opciones : 0;
+      if (n && !(await confirmar('Ejecutar ahora', 'Se van a bajar ' + n + ' opciones de «' + v.lista.nombre + '» (un archivo por cada una). Puede tardar un rato.', 'Ejecutar ahora'))) return;
+      try {
+        await api('POST', 'reportes/' + x.id + '/cada_mes', { probar: true, todas: e.todas, fechas: e.fechas, imprimir: e.imprimir });
+        cerrarModal();
+        toast('Bajando «' + nombre + '»' + (n ? ' (' + n + ' opciones)' : '') + '. Mira la lista de descargas.', 'ok');
+      } catch (err) { errorToast(err); }
+    };
+    const probar = async () => {
+      try {
+        const e = eleccion();
+        await api('POST', 'reportes/' + x.id + '/cada_mes', { probar: true, fechas: e.fechas, imprimir: e.imprimir });
+        cerrarModal();
+        toast('Probando «' + nombre + '» con una sola opción: mira la lista de descargas.', 'ok');
+      } catch (err) { errorToast(err); }
+    };
+    const quitar = async () => {
+      if (!(await confirmar('Quitarlo', '¿Dejar de ejecutarlo solo y de imprimir? Los pasos del reporte se quedan como están.', 'Quitarlo'))) return;
+      try {
+        const r = await api('POST', 'reportes/' + x.id + '/cada_mes', { quitar: true });
+        cerrarModal();
+        toast((r.cambios || []).length ? 'Quitado: ' + r.cambios.join('; ') : 'No había nada programado', 'ok');
+        refrescar();
+      } catch (err) { errorToast(err); }
+    };
+    const botones = [{ texto: 'Cancelar', accion: cerrarModal }];
+    if (v.cuando.activo) botones.push({ texto: 'Quitarlo', accion: quitar });
+    botones.push({ texto: 'Probar ahora con 1 opción', accion: probar });
+    botones.push({ texto: '▶ Ejecutar ahora', accion: ejecutarAhora });
+    botones.push({ texto: 'Agregar a programar', clase: 'primario', accion: guardar });
+    abrirModal({ titulo: 'Programar «' + nombre + '»', ancho: true,
+      contenido: h('div', { class: 'cada-mes', 'data-modal-cada-mes': String(x.id) },
+        h('h4', null, 'Qué baja'), lineaLista,
+        h('h4', null, 'De qué fechas'), cajaFechas,
+        h('h4', null, 'Imprimir'), cas.el, avisoImp,
+        h('h4', null, 'Cuándo'),
+        h('div', { class: 'fila' }, selModo, etqDia, inpDia, selDiaSem, etqHora, inpHora),
+        h('p', { class: 'ayuda' }, 'Se crea una tarea en el Programador de tareas de Windows (con tu usuario y con la sesión de Windows iniciada).'),
+        avanzadas, avisoHorario, resumen),
+      botones });
+  }
+  // La línea de la fila: «Cada mes, día 1 a las 07:00 · todas las opciones de «Localidad» (17) · del mes anterior · imprime»
+  function lineaProgramado(x) {
+    const cm = x.cada_mes || {};
+    return h('button', { type: 'button', class: 'estado-prog' + (cm.activo ? ' activo' : ''), 'data-estado-prog': String(x.id),
+      title: 'Abrir «Programar»', onclick: () => modalProgramar(x) },
+    ico('calendario'), h('span', null, cm.activo ? (cm.texto || 'Programado') : 'Sin programar'));
+  }
+  function botonProgramar(x) {
+    return boton('📅 Programar…', () => modalProgramar(x), 'chico sec', { 'data-programar': String(x.id),
+      title: 'Qué baja, de qué fechas, si imprime y cada cuánto se ejecuta solo' });
+  }
+
+  // ------------------------------------------------------------------ v3.9: (lo de antes, que reusa la ventana nueva)
+  // Todo lo que hacía falta tocar en cuatro sitios (la lista, las fechas, la impresora y el horario), en una ventana.
+
+  // ------------------------------------------------------------------ v3.9: «Descargar todas»
+  // Un reporte con una lista (comercios, localidades, sucursales…) se puede bajar entero: el bot elige cada opción de
+  // la lista y repite los pasos que van después (un archivo por cada una).  No cambia el reporte guardado.
+  function listaDeTodas(x) {
+    const listas = (x && x.todas) || [];
+    return listas.length ? listas[0] : null;
+  }
+  async function descargarTodas(x) {
+    const l = listaDeTodas(x);
+    if (!l) {
+      toast('«' + x.nombre + '» no tiene ninguna lista de opciones. Usa «Mapear página» para traerla.', 'aviso');
+      return null;
+    }
+    const cuantas = l.opciones ? 'Se van a bajar ' + l.opciones + ' opciones de «' + l.nombre + '» (un archivo por cada una).'
+      : 'El bot leerá la lista «' + l.nombre + '» y bajará un archivo por cada opción.';
+    if (!(await confirmar('Descargar todas', cuantas + ' Puede tardar un rato. El reporte guardado no cambia.', 'Descargar todas'))) return null;
+    cursoPoner(x.id, { trabajo: null, pct: 2, texto: 'Leyendo la lista «' + l.nombre + '»…', optimista: true });
+    try {
+      const t = await api('POST', 'reportes/' + x.id + '/todas', { paso: l.paso });
+      toast('Bajando todas las opciones de «' + l.nombre + '»' + (t.opciones ? ' (' + t.opciones + ')' : '') + '. Puedes seguir trabajando.');
+      return t;
+    } catch (e) {
+      const c = E.curso.get(x.id);
+      if (c && c.optimista && !c.trabajo) { E.curso.delete(x.id); avisarVistas({ tipo: '_curso', reporte_id: x.id }); }
+      errorToast(e);
+      return null;
+    }
+  }
+  // ------------------------------------------------------------------ v3.9: todo lo que baja una ejecución grande
+  // Con «para cada opción» (cada comercio…) o «Repetir por días / meses / quincenas», el servidor manda la lista entera
+  // (evento «descargas») con el estado de cada elemento.  Se ve debajo de la barra del trabajo en curso y se queda al
+  // terminar, como resumen, hasta que se cierra o empieza otra ejecución.
+  const ICONO_DESCARGA = { pendiente: '·', descargando: '⟳', listo: '✔', fallo: '✖', sin_hacer: '–' };
+  function textoDescarga(it) {
+    const archivos = (it.archivos || []).map((a) => a.tipo + ' ✔' + (a.impreso === true ? ' (impreso)' : (a.impreso === false ? ' (sin imprimir)' : ''))).join(' ');
+    if (it.estado === 'listo') return archivos || 'listo';
+    if (it.estado === 'descargando') return 'descargando…' + (archivos ? ' ' + archivos : '');
+    if (it.estado === 'fallo') return 'falló: ' + (it.motivo || '') + (archivos ? ' · ' + archivos : '');
+    if (it.estado === 'sin_hacer') return it.motivo || 'sin hacer';
+    return 'pendiente';
+  }
+  function pintarDescargas() {
+    const caja = $('#descargas');
+    if (!caja) return;
+    const d = E.descargas;
+    if (!d || !(d.items || []).length && !d.por_leer || E.descargasCerradas === d.trabajo + '|' + d.reporte) {
+      caja.classList.add('oculto'); caja.replaceChildren(); return;
+    }
+    caja.classList.remove('oculto');
+    let lista = caja.querySelector('ol');
+    const arriba = lista ? lista.scrollTop : 0;
+    const cuenta = [d.listos ? d.listos + ' listos' : '', d.fallos ? d.fallos + (d.fallos === 1 ? ' falló' : ' fallaron') : '',
+      d.pendientes ? d.pendientes + ' pendientes' : '', d.sin_hacer ? d.sin_hacer + ' sin hacer' : ''].filter(Boolean).join(' · ');
+    lista = h('ol', { class: 'desc-lista', 'data-descargas-lista': '1', 'aria-label': 'Lo que se baja' },
+      (d.items || []).map((it) => h('li', { class: 'desc-item ' + it.estado, 'data-estado': it.estado, 'data-item': it.texto },
+        h('span', { class: 'desc-ico', 'aria-hidden': 'true' }, ICONO_DESCARGA[it.estado] || '·'),
+        h('div', { class: 'desc-nom' }, h('span', null, it.texto), d.con_periodos && it.opcion !== null && it.opcion !== undefined && it.periodo_texto ? h('small', null, it.periodo_texto) : null),
+        h('div', { class: 'desc-est' }, h('span', { class: 'solo-lector' }, ({ pendiente: 'Pendiente', descargando: 'Descargando', listo: 'Listo', fallo: 'Falló', sin_hacer: 'Sin hacer' }[it.estado] || '') + ': '), textoDescarga(it)))));
+    caja.replaceChildren(
+      h('div', { class: 'desc-cab' },
+        h('div', { class: 'crece' }, h('strong', { 'data-descargas-titulo': '1' }, d.titulo), h('div', { class: 'desc-resumen', 'data-descargas-resumen': '1' }, d.resumen),
+          cuenta ? h('div', { class: 'desc-cuenta' }, (d.terminado ? 'Terminado: ' : '') + cuenta) : null),
+        d.terminado ? boton('Cerrar', () => { E.descargasCerradas = d.trabajo + '|' + d.reporte; pintarDescargas(); }, 'chico sec', { 'data-cerrar-descargas': '1' }) : null),
+      lista);
+    lista.scrollTop = arriba;
+    const actual = lista.querySelector('.desc-item.descargando');
+    if (actual && !d.terminado) {
+      const centro = actual.offsetTop - lista.offsetTop - lista.clientHeight / 2 + actual.offsetHeight / 2;
+      lista.scrollTop = Math.max(0, centro);
+    }
   }
 
   // Guía de inicio: oscurece todo menos el elemento real, con un globo y una flecha.  Se puede saltar siempre (Esc o
@@ -1462,9 +1954,9 @@
     { sel: '[data-guia="nuevo"]', t: 'Empieza aquí', x: 'Pulsa aquí y pega la dirección de la web. El bot encuentra sus listas, fechas y botones.' },
     { sel: '.fila-rep [data-ejecutar]', t: 'Con un clic lo bajas', x: 'Lo que guardes queda en esta lista, listo para descargar cuando quieras.',
       otro: '[data-guia="reportes"]', xOtro: 'Lo que guardes aparecerá en esta lista. Con un clic lo descargas cuando quieras.' },
-    { sel: '[data-chip-fecha]', t: 'Elige de qué fecha', x: '«Hoy» cambia solo: el miércoles baja el del miércoles y el jueves, el del jueves.',
+    { sel: '[data-estado-prog]', t: 'Mira cómo está', x: 'Aquí ves si se baja solo, qué baja y si lo imprime. Toca la línea para cambiarlo.',
       otro: '[data-guia="parada-fecha"]', xOtro: 'Cada reporte tiene su fecha. «Hoy» cambia sola: el miércoles baja el del miércoles y el jueves, el del jueves.' },
-    { sel: '[data-programar]', t: 'Que se haga solo', x: 'Elige días y hora. El bot lo descarga sin que estés aquí.',
+    { sel: '[data-programar]', t: 'Todo en un sitio', x: 'Qué baja (todos los comercios), de qué fechas, si lo imprime y cada cuánto se hace solo.',
       otro: '[data-guia="parada-descargar"]', xOtro: 'Podrás bajarlo ahora o elegir días y hora para que el bot lo haga sin ti.' }];
   let GUIA = null;
   const visibleEn = (sel) => [...document.querySelectorAll('#contenido ' + sel)].find((x) => { const r = x.getBoundingClientRect(); return r.width > 0 && r.height > 0; }) || null;
@@ -1824,7 +2316,7 @@
       h('div', { class: 'nom' }, h('a', { href: '#/editor/' + r.id, title: 'Editar los pasos' }, r.nombre), textoSitio(r) ? h('span', { class: 'sitio' }, textoSitio(r)) : null,
         r.vigilado ? chip('vigilado', 'info') : null),
       h('div', { class: 'cuando' }, linea1, h('br'), linea2),
-      h('div', { class: 'acc' }, chipFecha(r), boton('Programar', () => programarReporte(r.id, r.nombre), 'chico sec', { 'data-programar': String(r.id) }), secundario, ejecutar),
+      h('div', { class: 'acc' }, lineaProgramado(r), botonProgramar(r), secundario, ejecutar),
       h('div', { class: 'det' + clase, title: det }, det),
       enCurso ? h('div', { class: 'barra', role: 'progressbar', 'aria-valuemin': '0', 'aria-valuemax': '100', 'aria-valuenow': String(Math.round((x && x.pct) || 0)), 'aria-label': 'Progreso de ' + r.nombre },
         h('i', { style: 'width:' + Math.max(3, (x && x.pct) || 0) + '%' })) : null);
@@ -2204,7 +2696,7 @@
           x.vigilancia ? chip('vigilado', 'info') : null),
         h('div', { class: 'cuando' }, enCurso ? h('span', { class: 'pct' }, Math.round((cur && cur.pct) || 0) + ' %') : (x.ultima ? cuandoCorto(x.ultima) : 'nunca'), h('br'),
           enCurso ? 'en curso' : (x.resultado === 'ok' ? h('span', { class: 't-ok' }, 'bien') : (x.resultado === 'error' ? h('span', { class: 't-err' }, 'falló') : (x.resultado === 'detenido' ? h('span', { class: 't-aviso' }, 'detenido') : '—')))),
-        h('div', { class: 'acc' }, chipFecha(x),
+        h('div', { class: 'acc' }, lineaProgramado(x), botonProgramar(x),
           boton('▶ ' + (enCurso ? 'En curso' : 'Ejecutar'), () => ejecutar([x.id], x.nombre), 'chico primario', { disabled: enCurso, 'aria-label': 'Ejecutar ' + x.nombre }),
           boton('⚙ Usar filtros', () => panelFiltros(x.id), 'chico sec'),
           boton('Editar pasos', () => { location.hash = '#/editor/' + x.id; }, 'chico sec'),
@@ -2819,6 +3311,8 @@
       }
       ops.al_terminar = leerAlTerminar();
       if (!ops.al_terminar) delete ops.al_terminar;
+      ops.imprimir_pdf = impPdf.leer();                // v3.9: «Imprimir los PDF que descargue»
+      if (!ops.imprimir_pdf.activo && !ops.imprimir_pdf.impresora) delete ops.imprimir_pdf;
       flujo.opciones = ops;
       const vars = {};
       o.variables.value.split(';').forEach((par) => { const i = par.indexOf('='); if (i > 0) vars[par.slice(0, i).trim()] = par.slice(i + 1).trim(); });
@@ -2899,6 +3393,8 @@
       } catch (e) { errorToast(e); }
     }
 
+    // v3.9: «Imprimir los PDF que descargue» (a la vista, junto al nombre del reporte)
+    const impPdf = casillaImprimir((flujo.opciones || {}).imprimir_pdf || {}, () => marcar());
     // v3.9: «Al terminar, ejecutar…»: otros reportes que se ejecutan después de este (sin círculos: lo comprueba el bot)
     const alTerminar = (flujo.opciones || {}).al_terminar || {};
     const cajaCadena = h('div', { class: 'lista-casillas', 'data-al-terminar-lista': '1' });
@@ -3037,6 +3533,7 @@
       }), h('span', { class: 'espacio' }),
       boton('Volver a Reportes', async () => { if (!sucio || await confirmar('Cambios sin guardar', 'Hay cambios sin guardar. ¿Salir igualmente?', 'Salir')) location.hash = '#/reportes'; })));
     c.appendChild(panel(null, h('div', { class: 'formulario' }, ef('Nombre del reporte', inNombre), ef('Dirección (URL)', inUrl)),
+      impPdf.el,
       // v3.7: el nombre y la carpeta de lo que se descarga, a la vista (antes solo dentro de cada paso «Descargar»)
       h('details', { class: 'opciones', open: true, 'data-archivo-descargado': '1' }, h('summary', null, 'Archivo descargado (nombre y carpeta)'),
         archivoNombres,
@@ -3976,6 +4473,7 @@
       const grande = h('div', { class: 'asi-grande', 'data-cuenta-pasos': '1' });
       const resumen = h('p', { class: 'ayuda', 'data-resumen-pasos': '1' });
       let crear = null;
+      let guardarMapa = null;        // v3.9: lo que hace «Guardar el reporte» (lo reusa «Descargar todas»)
       function refrescar() {
         const dentro = paradas.filter((x) => x.m.incluido);
         let ref = lista.firstChild;
@@ -4015,13 +4513,24 @@
         const e = { k: f.k, traer: { get checked() { return m.incluido; } } };
         let vacio = () => false;
         if (f.tipo === 'lista' || f.tipo === 'lista_nativa') {
-          const s = h('select', { 'aria-label': 'Estrategia' }, ['fija', 'mas_reciente', 'primera', 'ultima', 'contiene', 'por_fecha'].map((v) => h('option', { value: v }, E.ayuda.estrategias[v])));
+          const s = h('select', { 'aria-label': 'Estrategia' }, ['fija', 'mas_reciente', 'primera', 'ultima', 'contiene', 'por_fecha', 'cada_una', 'marcadas'].map((v) => h('option', { value: v }, E.ayuda.estrategias[v])));
           s.value = m.estrategia || (/corte|semana|periodo|período|mes|fecha/i.test(f.etiqueta) ? 'mas_reciente' : 'fija');
           const valor = (f.opciones && f.opciones.length)
             ? h('select', { 'aria-label': 'Opción' }, f.valor ? null : h('option', { value: '' }, '(sin elegir)'), f.opciones.map((x) => h('option', { value: x }, x)))
             : h('input', { type: 'text', value: f.valor || '', 'aria-label': 'Texto' });
           if (f.valor) valor.value = f.valor;
           if (m.valor !== undefined) valor.value = m.valor;
+          // v3.9: «las que marque»: se marcan las opciones de la lista (una descarga por cada una)
+          if (m.valores === undefined) m.valores = [];
+          const marcadas = new Set(m.valores);
+          const cajaMarcadas = h('div', { class: 'mapa-marcadas oculto', role: 'group', 'aria-label': 'Opciones que se recorren' });
+          for (const x of (f.opciones || [])) {
+            const cb = h('input', { type: 'checkbox', checked: marcadas.has(x), value: x, 'aria-label': x });
+            cb.addEventListener('change', () => { if (cb.checked) marcadas.add(x); else marcadas.delete(x); m.valores = [...marcadas]; refrescar(); });
+            cajaMarcadas.appendChild(h('label', { class: 'linea' }, cb, h('span', null, x)));
+          }
+          if (!(f.opciones || []).length) cajaMarcadas.appendChild(h('span', { class: 'sub' }, 'No se pudieron leer las opciones de esta lista.'));
+          const ayudaBucle = h('div', { class: 'sub oculto' }, 'Los pasos que vayan después se repiten con cada opción (un archivo por cada una).');
           const actualizar = boton('Actualizar opciones', async () => {
             estado.textContent = 'Eligiendo «' + valor.value + '» y volviendo a leer las listas siguientes…';
             try { const d = await api('POST', 'mapa/actualizar', { k: f.k, valor: valor.value }); mapa.filtros = d.filtros; pintarMapa(); estado.textContent = 'Opciones actualizadas.'; }
@@ -4032,6 +4541,8 @@
           const pintarValor = () => {
             valor.classList.toggle('oculto', !['fija', 'contiene'].includes(s.value));
             chipF.classList.toggle('oculto', s.value !== 'por_fecha');
+            cajaMarcadas.classList.toggle('oculto', s.value !== 'marcadas');
+            ayudaBucle.classList.toggle('oculto', !['cada_una', 'marcadas'].includes(s.value));
             chipF.replaceChildren(ico('calendario'), 'Fecha: ' + fechaEnChip({ valor: m.fecha }));
           };
           chipF.addEventListener('click', () => elegirFecha({ titulo: '¿De qué fecha lo quieres?', valor: m.fecha, formato: FORMATO_DEFECTO, lista: true, alAceptar: (v) => { m.fecha = v; pintarValor(); refrescar(); } }));
@@ -4040,9 +4551,25 @@
           valor.addEventListener('change', alCambiar);
           valor.addEventListener('input', alCambiar);
           pintarValor();
-          conf.append(s, valor, chipF, actualizar);
-          e.leer = () => ({ estrategia: s.value, valor: ['fija', 'contiene'].includes(s.value) ? valor.value : (s.value === 'por_fecha' ? m.fecha : '') });
-          vacio = () => ['fija', 'contiene'].includes(s.value) && !String(valor.value).trim();
+          // v3.9: «Descargar todas» aquí mismo: pone la lista en «todas, una tras otra», guarda el reporte y lo ejecuta
+          const todas = boton('⬇ Descargar todas', async () => {
+            const n = (f.opciones || []).length;
+            const texto = (n ? 'Se van a bajar ' + n + ' opciones de «' + (f.etiqueta || 'la lista') + '» (un archivo por cada una).'
+              : 'El bot bajará un archivo por cada opción de «' + (f.etiqueta || 'la lista') + '».') +
+              ' Primero se guarda el reporte con estos pasos. Puede tardar un rato.';
+            if (!(await confirmar('Descargar todas', texto, 'Guardar y descargar todas'))) return;
+            m.incluido = true;
+            m.estrategia = 'cada_una';
+            s.value = 'cada_una';
+            pintarValor();
+            refrescar();
+            if (guardarMapa) await guardarMapa({ ejecutar: true, lista: f.etiqueta || 'la lista', cuantas: n });
+          }, 'chico', { 'data-todas-mapa': String(f.k),
+            title: 'Guarda el reporte con la lista puesta en «todas, una tras otra» y lo ejecuta: un archivo por cada opción' });
+          conf.append(s, valor, chipF, actualizar, todas, cajaMarcadas, ayudaBucle);
+          e.leer = () => ({ estrategia: s.value, valor: ['fija', 'contiene'].includes(s.value) ? valor.value : (s.value === 'por_fecha' ? m.fecha : ''),
+                            valores: s.value === 'marcadas' ? [...marcadas] : [] });
+          vacio = () => (['fija', 'contiene'].includes(s.value) && !String(valor.value).trim()) || (s.value === 'marcadas' && !marcadas.size);
         } else if (f.tipo === 'fecha') {
           // v3.8: las tres tarjetas y el calendario: «hoy» con el formato del campo de la web, o cualquier otra fecha
           const a = analizarFecha(f.valor);
@@ -4134,17 +4661,29 @@
           h('label', null, 'Carpeta'), h('div', null, campoRuta(carpetaArch, { titulo: 'Carpeta de descargas del reporte' }),
             h('div', { class: 'ayuda' }, 'Vacío = la carpeta de descargas del bot.'))));
       const limpio = () => mapa.filtros.map((f) => { const x = Object.assign({}, f); delete x._e; return x; });
-      crear = boton('Guardar el reporte', async () => {
+      // v3.9: lo usan «Guardar el reporte» y «Descargar todas» (con `ejecutar`, además lo baja entero)
+      guardarMapa = async (opciones) => {
+        opciones = opciones || {};
         try {
           const cuerpo = { filtros: limpio(), elecciones: elecciones(), destino: destino.value, nombre: nombre.value,
             reporte_id: selRep.value ? parseInt(selRep.value, 10) : null, hasta: selHasta.value === '' ? null : parseInt(selHasta.value, 10), url: mapa.url };
           if (archivoMapa.carpeta !== null) cuerpo.carpeta_descargas = carpetaArch.value.trim();     // v3.7 (sin tocar: la de siempre)
           const d = await api('POST', 'mapa/crear_pasos', cuerpo);
           await api('POST', 'mapa/guardar', { reporte_id: d.id, url: mapa.url, alcance: mapa.alcance, filtros: limpio() });
-          toast('Reporte «' + d.nombre + '» guardado', 'ok');
-          location.hash = '#/editor/' + d.id;
-        } catch (e) { errorToast(e); }
-      }, 'primario grande crear', { 'data-crear-pasos': '1' });
+          if (!opciones.ejecutar) {
+            toast('Reporte «' + d.nombre + '» guardado', 'ok');
+            location.hash = '#/editor/' + d.id;
+            return d;
+          }
+          await api('POST', 'mapa/terminar', {});           // el navegador del mapeo se cierra: el reporte usa el suyo
+          await api('POST', 'ejecutar', { ids: [d.id] });
+          toast('Reporte «' + d.nombre + '» guardado. Bajando todas las opciones de «' + (opciones.lista || 'la lista') + '»' +
+            (opciones.cuantas ? ' (' + opciones.cuantas + ')' : '') + '…', 'ok');
+          location.hash = '#/';
+          return d;
+        } catch (e) { errorToast(e); return null; }
+      };
+      crear = boton('Guardar el reporte', () => guardarMapa(), 'primario grande crear', { 'data-crear-pasos': '1' });
       resultado.replaceChildren(h('div', { class: 'vista', 'data-mapa-paradas': '1' },
         h('div', { class: 'mapa-cab' }, h('h2', null, 'Esto es lo que encontré. ¿Lo dejo así?'),
           h('p', null, 'El bot hace las paradas de arriba abajo. Toca la X en lo que no quieras. Lo que dejes vacío, se lo salta.')),
@@ -4428,6 +4967,22 @@
       botones: [{ texto: 'Cancelar', accion: cerrarModal }] });
   }
 
+  // v3.9: los reportes que se ejecutan solos, para verlos aquí («que aparezcan ya programados en vigilancia»)
+  async function panelProgramados() {
+    let r = { reportes: [] };
+    try { r = await api('GET', 'programados'); } catch (e) { r = { reportes: [] }; }
+    const filas = (r.reportes || []).map((x) => h('li', { class: 'prog-item', 'data-programado': String(x.id) },
+      h('div', { class: 'nom' }, h('a', { href: '#/editor/' + x.id }, x.nombre)),
+      h('div', { class: 'sub' }, x.texto),
+      h('div', { class: 'fila' },
+        boton('📅 Programar…', () => modalProgramar(x), 'chico sec', { 'data-prog-abrir': String(x.id) }),
+        boton('▶ Ejecutar', () => ejecutarReportes([x.id], x.nombre), 'chico', { 'data-prog-ejecutar': String(x.id) }))));
+    return panel(h('span', null, 'Se bajan solos', chip(String((r.reportes || []).length), 'info')),
+      h('p', { class: 'ayuda' }, 'Reportes con una hora puesta: el bot los baja solo (y los imprime, si lo pediste). Pulsa «Programar…» para cambiar qué baja, de qué fechas, si imprime y cada cuánto.'),
+      filas.length ? h('ul', { class: 'lista-prog' }, filas)
+        : h('p', { class: 'vacio' }, 'Ningún reporte se baja solo todavía. Abre un reporte y pulsa «📅 Programar…».'));
+  }
+
   RUTAS.vigilancia = async (c) => {
     let d = await api('GET', 'vigilancia');
     // v3.5: tras guardar, pausar o borrar se piden los datos otra vez y solo cambian las tarjetas afectadas
@@ -4439,6 +4994,7 @@
     const secciones = h('div', { class: 'vista' });
     c.append(h('div', { class: 'barra-herr' }, boton('＋ Añadir vigilancia', () => modalElegirVigilable(d, recargar), 'primario', { 'data-anadir-vigilancia': '1' }),
         revisarTodas, cuenta),
+      await panelProgramados(),
       h('details', { class: 'panel', open: !d.total }, h('summary', null, '¿Qué es la vigilancia?'),
         h('p', { class: 'ayuda' }, 'El bot revisa un filtro (por ejemplo «Elegir corte» de Portal) y te avisa cuando aparece una opción nueva (el corte «45 - 2026 …» de la semana siguiente). Si marcas «descargar automáticamente lo nuevo», ejecuta el reporte o la página con esa opción (una vez por cada opción nueva) y no la vuelve a descargar.'),
         h('p', { class: 'ayuda' }, 'Puedes tener VARIAS vigilancias: otras listas, u otra vez la misma lista con otros valores (p. ej. «Elegir corte» para «Detalles Ventas Mayorista» y, aparte, para «Cartera General»), cada una con sus avisos y su descarga.'),
@@ -5162,6 +5718,7 @@
     $('#version').textContent = 'v' + E.estado.version;
     $('#version').title = 'Bot Web ' + E.estado.version;
     if (E.estado.trabajo) { E.trabajo = E.estado.trabajo; pintarTrabajo(); }
+    if (E.estado.descargas) { E.descargas = E.estado.descargas; pintarDescargas(); }   // v3.9
     pintarActualizacion(E.estado.actualizacion || null);          // v3.9
     try { E.ayuda = await api('GET', 'ayuda'); } catch (e) { /* se pide luego */ }
     refrescarCampana();

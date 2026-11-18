@@ -154,7 +154,8 @@ p.ayuda + p.ayuda { margin-top: -2px; }
 
 /* filas densas (reportes, historial) */
 .filas { list-style: none; margin: 0; padding: 0; }
-.fila-rep { display: grid; grid-template-columns: 14px minmax(0, 1fr) auto auto; gap: 3px 14px; align-items: center; padding: 11px 16px;
+/* v3.9: el nombre nunca se queda sin sitio aunque la fila lleve muchos botones (Fecha, Imprimir, Descargar todas…) */
+.fila-rep { display: grid; grid-template-columns: 14px minmax(190px, 1fr) auto auto; gap: 3px 14px; align-items: center; padding: 11px 16px;
             border-bottom: 1px solid var(--linea); }
 .fila-rep:last-child { border-bottom: 0; }
 .fila-rep:hover { background: var(--hover); }
@@ -171,7 +172,8 @@ p.ayuda + p.ayuda { margin-top: -2px; }
 .fila-rep .acc { grid-row: 1 / span 2; grid-column: 4; display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
 .fila-rep .barra { grid-column: 2 / -1; height: 3px; background: var(--linea); border-radius: 2px; overflow: hidden; margin-top: 5px; }
 .fila-rep .barra > i { display: block; height: 100%; background: var(--vivo); transition: width .6s linear; }
-.fila-rep.con-casilla { grid-template-columns: 18px 14px minmax(0, 1fr) auto auto; }
+.fila-rep.con-casilla { grid-template-columns: 18px 14px minmax(190px, 1fr) auto auto; }
+.fila-rep .acc { max-width: 60%; }
 .fila-rep.con-casilla .det, .fila-rep.con-casilla .barra { grid-column: 3 / -1; }
 .fila-rep.con-casilla .det { grid-column: 3; }
 .fila-rep.con-casilla .cuando { grid-column: 4; }
@@ -361,6 +363,37 @@ details.config-pagina[open] > summary, details.opciones[open] > summary { margin
 .opciones-multi li { padding: 6px 0; }
 .opciones-lista { max-height: 160px; overflow-x: hidden; overflow-y: auto; overflow-wrap: anywhere; font: 12px var(--f-mono); color: var(--suave); margin: 4px 0 0; padding-left: 20px; }
 .mapa-config { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+/* v3.9: la línea de estado de la fila («Cada mes, día 1 a las 07:00 · …») y la lista de «Se bajan solos» */
+.estado-prog { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; padding: 4px 10px; border-radius: 999px;
+  border: 1px dashed var(--linea); background: transparent; color: var(--suave); font: 12.5px var(--f-texto); cursor: pointer;
+  text-align: left; }
+.estado-prog:hover { border-color: var(--vivo); color: var(--texto); }
+.estado-prog.activo { border-style: solid; color: var(--texto); background: var(--hover); }
+.estado-prog > span { overflow-wrap: anywhere; }
+.lista-prog { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.lista-prog .prog-item { display: grid; grid-template-columns: minmax(160px, 1fr) auto; gap: 2px 12px; align-items: center;
+  padding: 8px 10px; border: 1px solid var(--linea); border-radius: 10px; }
+.lista-prog .prog-item .nom { font-weight: 500; overflow-wrap: anywhere; }
+.lista-prog .prog-item .sub { grid-column: 1; color: var(--suave); font: 12.5px var(--f-texto); overflow-wrap: anywhere; }
+.lista-prog .prog-item .fila { grid-column: 2; grid-row: 1 / span 2; display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+@media (max-width: 560px) {
+  .lista-prog .prog-item { grid-template-columns: 1fr; }
+  .lista-prog .prog-item .fila { grid-column: 1; grid-row: auto; justify-content: flex-start; }
+}
+
+/* v3.9: la ventana «Cada mes: bajar todo e imprimir» */
+.cada-mes h4 { margin: 14px 0 4px; }
+.cada-mes h4:first-child { margin-top: 0; }
+.cada-mes .casilla { display: flex; align-items: center; gap: 8px; margin: 3px 0; }
+.cada-mes .fila { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.cada-mes input.corto { width: auto; min-width: 90px; }
+.cada-mes .fila select { width: auto; min-width: 140px; max-width: 100%; }
+.cada-mes .cm-resumen { margin-top: 14px; padding: 10px 12px; border-radius: 10px; background: var(--hover);
+  border: 1px solid var(--linea); font-weight: 500; }
+.cada-mes .aviso-imp { color: var(--aviso, #8a6d00); }
+.mapa-marcadas { display: flex; flex-direction: column; gap: 2px; max-height: 160px; overflow-y: auto; width: 100%; }
+.mapa-marcadas .linea { display: flex; align-items: center; gap: 6px; }
+.mapa-marcadas input[type=checkbox] { width: auto; min-width: 0; }
 .mapa-config select, .mapa-config input { width: auto; min-width: min(140px, 100%); max-width: 100%; }
 
 /* v3.2: Páginas */
@@ -724,3 +757,78 @@ code.comando { display: block; font: 12px/1.45 var(--f-mono); background: var(--
 .lista-casillas { display: flex; flex-direction: column; gap: 4px; max-height: 220px; overflow-y: auto; padding: 4px 0; }
 .lista-casillas .casilla { display: flex; align-items: center; gap: 6px; font-weight: normal; overflow-wrap: anywhere; }
 .lista-casillas .casilla input { flex: none; }
+
+/* v3.9: la fecha del reporte con UN calendario: rojo = «Desde», azul = «Hasta», en medio sombreado */
+.rc { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.rc-ahora { margin: 0; padding: 10px 14px; border-radius: 12px; background: var(--panel-2); font-weight: 600; overflow-wrap: anywhere; }
+.rc-cal { background: var(--panel-2); border-radius: 14px; padding: 12px 14px 14px; min-width: 0; width: 100%; max-width: 560px; align-self: center; }
+.rc-cal.apagado { opacity: .55; }
+.rc-cab { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; min-width: 0; }
+.rc-cab select { flex: 1 1 0; min-width: 0; min-height: 38px; font: 700 16px var(--f-titulo); }
+.rc-semana, .rc-mes-dias { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; }
+.rc-semana span { font-size: 12.5px; font-weight: 600; text-align: center; color: var(--suave); padding: 2px 0; }
+.rc-dia { min-height: 40px; border: 1.5px solid var(--linea); border-radius: 10px; background: #fff; color: var(--texto); font-weight: 600; font-size: 14px; padding: 0; min-width: 0; transition: transform .12s; }
+.rc-dia:hover { transform: translateY(-2px); border-color: var(--tinta); }
+.rc-dia.nada { visibility: hidden; }
+.rc-dia.hoy { border: 2.5px solid var(--tinta); }
+.rc-dia.entre { background: var(--f-entre); border-color: var(--f-entre); }
+.rc-dia.desde { background: var(--f-desde); border-color: var(--f-desde); color: #fff; }
+.rc-dia.hasta { background: var(--f-hasta); border-color: var(--f-hasta); color: #fff; }
+.rc-dia.desde.hasta { background: linear-gradient(135deg, var(--f-desde) 50%, var(--f-hasta) 50%); border-color: var(--tinta); }
+.rc-ley { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 8px; font-size: 13px; color: var(--suave); }
+.rc-ley > span, .rc-mapa > span { display: inline-flex; align-items: center; gap: 6px; }
+.rc-ley i, .rc-mapa i { display: inline-block; width: 14px; height: 14px; border-radius: 4px; flex: none; }
+.m-desde { background: var(--f-desde); } .m-hasta { background: var(--f-hasta); } .m-entre { background: var(--f-entre); border: 1px solid var(--linea); }
+.rc-ley .m-hoy { border: 2.5px solid var(--tinta); }
+.rc-resumen { margin: 0; font: 700 19px var(--f-titulo); overflow-wrap: anywhere; }
+.rc-mapa { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; font-size: 14px; min-width: 0; }
+.rc-mapa b { overflow-wrap: anywhere; }
+.rc-mapa .ancho { flex-basis: 100%; }
+.rc-reciente { font-weight: 600; }
+.rc-mes { border: 2px solid var(--linea); border-radius: 14px; padding: 12px 14px; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.rc-mes-fila { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
+.rc-mes-cb { display: inline-flex; align-items: center; gap: 8px; font: 700 16px var(--f-titulo); cursor: pointer; }
+.rc-mes-cb input { width: 20px; height: 20px; flex: none; }
+.rc-hora { display: inline-flex; align-items: center; gap: 6px; font: 500 14px var(--f-texto); white-space: nowrap; }
+.rc-hora input { min-height: 34px; }
+.rc-estado { margin: 0; font-weight: 700; color: var(--ok); overflow-wrap: anywhere; }
+.rc-estado.pendiente { color: var(--aviso); }
+
+/* v3.9: «Imprimir los PDF que descargue» */
+.imprimir-pdf { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; margin-top: 12px; padding: 10px 14px; border: 1.5px dashed var(--linea-2); border-radius: 12px; min-width: 0; }
+.imprimir-pdf.activa { border-style: solid; border-color: var(--tinta); background: var(--panel-2); }
+.imprimir-pdf .imp-cb { display: inline-flex; align-items: center; gap: 8px; font: 700 16px var(--f-titulo); cursor: pointer; }
+.imprimir-pdf .imp-cb input { width: 20px; height: 20px; flex: none; }
+.imprimir-pdf .imp-cb svg.ico { width: 20px; height: 20px; }
+.imprimir-pdf .imp-en { display: inline-flex; align-items: center; gap: 6px; flex: 1 1 220px; min-width: 0; }
+.imprimir-pdf .imp-en select { flex: 1 1 auto; min-width: 0; max-width: 100%; }
+.imprimir-pdf .ayuda { flex-basis: 100%; }
+.chip-imprimir { border-style: dotted; color: var(--suave); }
+.chip-imprimir.activo { border-style: solid; color: var(--texto); background: var(--panel); }
+
+/* v3.9: todo lo que baja una ejecución grande (cada comercio × cada mes…) */
+.descargas { display: flex; flex-direction: column; gap: 8px; background: var(--panel); border: 1.5px solid var(--tinta); border-radius: var(--radio); padding: 12px 18px; margin-top: 10px; min-width: 0; }
+.desc-cab { display: flex; align-items: flex-start; gap: 12px; min-width: 0; }
+.desc-cab .crece { flex: 1; min-width: 0; }
+.desc-cab strong { display: block; font: 700 17px var(--f-titulo); overflow-wrap: anywhere; }
+.desc-resumen { font-weight: 600; overflow-wrap: anywhere; }
+.desc-cuenta { color: var(--suave); font-size: 13px; }
+.desc-lista { list-style: none; margin: 0; padding: 0; max-height: 300px; overflow-y: auto; overflow-x: hidden; border-top: 1px solid var(--linea); }
+.desc-item { display: grid; grid-template-columns: 22px minmax(0, 1fr) minmax(0, auto); align-items: start; gap: 2px 10px; padding: 6px 4px; border-bottom: 1px solid var(--linea); }
+.desc-ico { font-weight: 800; text-align: center; line-height: 1.4; }
+.desc-nom { min-width: 0; overflow-wrap: anywhere; font-weight: 600; }
+.desc-nom small { display: block; font-weight: 400; color: var(--suave); }
+.desc-est { min-width: 0; overflow-wrap: anywhere; font-size: 13.5px; text-align: right; color: var(--suave); }
+.desc-item.listo .desc-ico, .desc-item.listo .desc-est { color: var(--ok); }
+.desc-item.fallo .desc-ico, .desc-item.fallo .desc-est { color: var(--error); }
+.desc-item.descargando { background: var(--vivo-suave); }
+.desc-item.descargando .desc-ico { color: var(--vivo); animation: desc-gira 1.2s linear infinite; }
+.desc-item.sin_hacer { color: var(--tenue); }
+@keyframes desc-gira { to { transform: rotate(360deg); } }
+@media (max-width: 600px) {
+  .desc-item { grid-template-columns: 22px minmax(0, 1fr); }
+  .desc-est { grid-column: 2; text-align: left; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .rc-dia, .desc-item.descargando .desc-ico { animation: none !important; transition: none !important; }
+}

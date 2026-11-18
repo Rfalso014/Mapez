@@ -183,6 +183,8 @@ class Aplicacion:
         self.actualizador = None
         self.actualizando = False
         self.salir = threading.Event()
+        # v3.9: la lista de lo que baja la ejecución en curso o la última («para cada opción», periodos) para la interfaz
+        self.descargas = None
 
     # ----------------------------------------------------------- utilidades
     def _oculto(self, ver):
@@ -238,7 +240,17 @@ class Aplicacion:
                         variables=variables, hoy=self.hoy,
                         progreso=lambda i, estado, texto="": self._progreso(trabajo, i, estado, texto, flujo.nombre),
                         log=self._log, detener=trabajo.detener, pedir_acceso=self._pedir_acceso(trabajo),
-                        accesos=self.almacen, notificar=self._notificar, reporte_id=reporte_id, **extra)
+                        accesos=self.almacen, notificar=self._notificar, reporte_id=reporte_id,
+                        imprimir=self.imprimir_archivo, lista_descargas=self._avisar_descargas(trabajo, reporte_id),
+                        **extra)
+
+    def _avisar_descargas(self, trabajo, reporte_id):
+        """v3.9: la función con la que el ejecutor avisa de su lista de descargas (evento «descargas»)."""
+        def avisar(datos):
+            d = dict(datos, trabajo=trabajo.id, reporte_id=reporte_id)
+            self.descargas = d
+            self.eventos.emitir("descargas", **d)
+        return avisar
 
     def lanzar(self, tipo, descripcion, funcion, **objetivo):
         """Empieza un trabajo con navegador en su hilo (uno a la vez).  v3.5: `objetivo` (reporte_id, pagina_id,
@@ -252,6 +264,7 @@ class Aplicacion:
                 raise ErrorApi("Bot Web se está actualizando: se cerrará y volverá a abrirse solo en unos minutos.", 409)
             t = Trabajo(tipo, descripcion, objetivo)
             self.trabajo = t
+            self.descargas = None                     # v3.9: la lista de la ejecución anterior ya no vale
 
         def correr():
             ok, resumen = False, ""
@@ -308,6 +321,7 @@ class Aplicacion:
                 "grabando": self.grabador is not None, "mapeando": self.sesion_mapa is not None
                 and not self.sesion_mapa.terminada.is_set(), "al_iniciar": list(self.al_iniciar),
                 "guia_pendiente": bool(self.guia_al_abrir and not self.almacen.ajustes().get("guia_vista")),
+                "descargas": self.descargas,
                 "actualizacion": self.actualizador.estado() if self.actualizador is not None else None}
 
     # ------------------------------------------------------- v3.9: actualizaciones
@@ -644,27 +658,72 @@ class Aplicacion:
                         "mensaje": u.get("mensaje") or "", "archivos": u.get("archivos") or [],
                         "duracion": u.get("duracion"), "vigilado": x["id"] in vigilados,
                         "programado": bool(tarea), "proxima": (tarea or {}).get("proxima", ""),
-                        "fechas": self._fechas_de_reporte(x["id"]),
-                        "cuando_texto": horario.describir(g["programacion"]) if g else ""})
+                        "cuando_texto": horario.describir(g["programacion"]) if g else "",
+                        **self._extra_reporte(x["id"])})
         return res
 
     def _fechas_de_reporte(self, rid):
         """v3.8: lo que el chip «Fecha: …» enseña y cambia: los campos de fecha del reporte, sus listas «por fecha» y las
-        listas «la más reciente» (se pasan a «por fecha» solo si el usuario lo elige)."""
-        from . import filtros as mod_filtros
+        listas «la más reciente» (se pasan a «por fecha» solo si el usuario lo elige).  v3.9: con su papel (rol: desde,
+        hasta, unica u otra)."""
+        return self._extra_reporte(rid)["fechas"]
+
+    def _extra_reporte(self, rid):
+        """v3.9: lo que la lista de reportes enseña de cada uno además de lo guardado en la tabla: sus campos de fecha
+        («Fecha: …»), si se repite (y cómo) y «Imprimir los PDF que descargue»."""
+        from . import fechas_reporte as mod_fechas
         try:
             fl = self.almacen.cargar_flujo(rid)
         except Exception:                 # noqa: BLE001 (un reporte dañado no impide enseñar los demás)
-            return []
-        res = []
-        for i, p in mod_filtros.pasos_filtro(fl):
-            lista = p.tipo == "elegir_opcion" and (p.estrategia or "fija") in ("por_fecha", "mas_reciente")
-            if p.tipo != "escribir" and not lista:
-                continue
-            res.append({"paso": i, "nombre": p.filtro or p.objetivo or "Fecha", "valor": p.valor or "", "lista": lista,
-                        "estrategia": (p.estrategia or "fija") if lista else "",
-                        "formato": plantillas.formato_de_fecha(p.valor) or ""})
-        return res
+            return {"fechas": [], "imprimir_pdf": mod_flujo.imprimir_pdf({}), "repite": "", "todas": [],
+                    "cada_mes": {"activo": False, "dia": 1, "hora": "07:00", "imprime": False}}
+        conf = fl.opciones.get("repetir_dias")
+        repite = ""
+        if isinstance(conf, dict) and (conf.get("modo") or "no") not in ("no", ""):
+            repite = mod_flujo.describir_repetir_dias(conf)
+        return {"fechas": mod_fechas.campos_de_fecha(fl)[0], "imprimir_pdf": mod_flujo.imprimir_pdf(fl.opciones),
+                "repite": repite, "todas": self._listas_todas(rid, fl), "cada_mes": self._estado_cada_mes(rid, fl)}
+
+    def _estado_cada_mes(self, rid, fl):
+        """v3.9: lo que enseña la fila del reporte: cuándo se ejecuta solo, qué baja y si imprime, en una frase."""
+        from . import fechas_reporte as mod_fechas
+        g = self.almacen.programacion("reporte:%d" % rid)
+        prog = g["programacion"] if g and (g["programacion"].get("reglas") or []) else None
+        est = mod_fechas.como_esta_programado(prog)
+        partes = [mod_fechas.texto_cuando(est)]
+        lista = next(iter(self._listas_todas(rid, fl)), None)
+        if lista is not None:
+            p = fl.pasos[int(lista["paso"])]
+            if (p.estrategia or "") == "cada_una":
+                partes.append("todas las opciones de «%s»%s" % (lista["nombre"],
+                                                                (" (%d)" % lista["opciones"]) if lista["opciones"] else ""))
+            elif (p.estrategia or "") == "marcadas":
+                partes.append("%d opciones de «%s»" % (len(p.valores), lista["nombre"]))
+        campos, _ = mod_fechas.campos_de_fecha(fl)
+        relativas = [c for c in campos if c["rol"] != "otra"
+                     and plantillas.analizar_fecha(c["valor"])["modo"] == "relativa"]
+        if campos and len(relativas) == len([c for c in campos if c["rol"] != "otra"]):
+            if all("mes_anterior" in (plantillas.analizar_fecha(c["valor"]).get("que") or "") for c in relativas):
+                partes.append("del mes anterior")
+        imprime = mod_flujo.imprimir_pdf(fl.opciones)["activo"]
+        if imprime:
+            partes.append("imprime")
+        return {"activo": est["modo"] != "no" or bool(est["otro"]), "dia": est["dia"], "hora": est["hora"],
+                "modo": est["modo"], "dia_semana": est["dia_semana"], "otro": est["otro"], "imprime": imprime,
+                "texto": " · ".join(partes)}
+
+    def _listas_todas(self, rid, fl):
+        """v3.9 «Descargar todas»: las listas del reporte que se pueden recorrer, con cuántas opciones tenían la última
+        vez que se leyeron (0 = todavía no se sabe; el bot las leerá al ejecutar)."""
+        cuantas = {}
+        try:
+            for f in self.almacen.opciones_filtro(rid):
+                paso = int(f["paso"])
+                if paso not in cuantas:
+                    cuantas[paso] = len([o for o in (f["opciones"] or []) if not mod_flujo.es_marcador_de_lista(o)])
+        except Exception:              # noqa: BLE001 (sin opciones guardadas se enseña el botón sin número)
+            cuantas = {}
+        return [dict(d, opciones=cuantas.get(int(d["paso"]), 0)) for d in mod_flujo.listas_para_todas(fl)]
 
     def _novedad_vigilancia(self):
         """v3.5: la opción nueva (sin descargar) más reciente de todas las vigilancias, o None."""
@@ -882,7 +941,7 @@ class Aplicacion:
                 for r in alm.listar():
                     r = dict(r)
                     r["vigilancia"] = bool(vig.get(r["id"]))
-                    r["fechas"] = self._fechas_de_reporte(r["id"])
+                    r.update(self._extra_reporte(r["id"]))
                     res.append(r)
                 return {"reportes": res}
             if metodo == "POST":
@@ -931,7 +990,338 @@ class Aplicacion:
                                        clave="reporte:%d" % rid)
         if accion == "filtros":
             return self._api_filtros(rid, metodo, partes[2] if len(partes) > 2 else "", datos)
+        if accion == "fechas":                                       # v3.9: el calendario «Desde / Hasta»
+            return self._api_fechas(rid, metodo, datos)
+        if accion == "imprimir":                                     # v3.9: «Imprimir los PDF que descargue»
+            return self._api_imprimir_reporte(rid, metodo, datos)
+        if accion == "todas":                                        # v3.9: «Descargar todas»
+            return self._api_todas(rid, metodo, datos)
+        if accion == "cada_mes":                                     # v3.9: «Cada mes: bajar todo e imprimir»
+            return self._api_cada_mes(rid, metodo, datos)
         raise ErrorApi("Acción no válida: %s" % accion, 404)
+
+    # ------------------------------------------- v3.9: la fecha con un calendario y «cada mes»
+    def _api_fechas(self, rid, metodo, datos):
+        """GET → los campos de fecha con su papel (rojo = desde, azul = hasta), la repetición y el horario «cada mes».
+        POST {desde, hasta, cambiadas, invertir, mas_reciente, cada_mes: {activo, hora}} → guarda las fechas en los
+        pasos (con una copia de antes) y crea, cambia o quita el horario del día 1 de cada mes."""
+        from . import fechas_reporte as mod_fechas
+        alm = self.almacen
+        fila = alm.obtener(rid)
+        if fila is None:
+            raise ErrorApi("No existe el reporte %d" % rid, 404)
+        fl = alm.cargar_flujo(rid)
+        clave = "reporte:%d" % rid
+        if metodo == "GET":
+            return self._vista_fechas(fl, clave)
+        if metodo != "POST":
+            raise ErrorApi("Método no válido", 405)
+        g = alm.programacion(clave)
+        prog = g["programacion"] if g and g["programacion"]["reglas"] else None
+        cm = datos.get("cada_mes") or {}
+        activo = cm.get("activo") is True
+        nuevo = fl.copia()
+        try:
+            lineas = mod_fechas.aplicar_eleccion(nuevo, datos.get("desde"), datos.get("hasta"),
+                                                 invertir=datos.get("invertir") is True, cada_mes=activo,
+                                                 mas_reciente=datos.get("mas_reciente") is True,
+                                                 cambiadas=datos.get("cambiadas") is not False)
+            p = mod_fechas.programacion_cada_mes(cm.get("hora"), nuevo.opciones.get("repetir_dias"),
+                                                 (prog or {}).get("ejecucion")) if activo else None
+        except mod_fechas.ErrorFechas as e:
+            raise ErrorApi(str(e))
+        if lineas:
+            alm.guardar_version(rid, "antes de cambiar la fecha")
+            self._guardar_flujo(nuevo, rid)
+            self._log("«%s»: fecha cambiada (%s)" % (fila["nombre"], "; ".join(lineas)))
+        existentes = {t["nombre"] for t in self._tareas()}
+        tarea = _corto(g["tarea"]) if g else ""
+        suyo = prog is not None and mod_fechas.es_horario_cada_mes(prog, fl.opciones.get("repetir_dias"))
+        horario_cambiado = None
+        if activo:
+            igual = prog is not None and horario.a_json(prog) == horario.a_json(p) and tarea in existentes
+            if not igual:
+                self._programar(rid, "POST", {"programacion": p, "confirmar": True}, False)
+                horario_cambiado = "creado"
+        elif suyo:
+            nombres = [n for n in (tarea, fila["nombre"]) if n and n in existentes]
+            if nombres:
+                self._quitar_tareas(nombres, {"confirmar": True}, clave=clave)
+            else:
+                alm.borrar_programacion(clave)
+            self._log("«%s»: ya no se baja solo cada mes (horario quitado)" % fila["nombre"])
+            horario_cambiado = "quitado"
+        res = self._vista_fechas(alm.cargar_flujo(rid), clave)
+        res.update(ok=True, cambios=lineas, horario=horario_cambiado)
+        return res
+
+    def _vista_fechas(self, fl, clave):
+        from . import fechas_reporte as mod_fechas
+        campos, por_orden = mod_fechas.campos_de_fecha(fl)
+        conf = fl.opciones.get("repetir_dias")
+        rep = None
+        if isinstance(conf, dict) and (conf.get("modo") or "no") not in ("no", ""):
+            try:
+                periodos = mod_flujo.periodos_a_repetir(conf, self.hoy)
+            except ErrorFlujo:
+                periodos = []
+            rep = {"modo": conf["modo"], "rango": conf.get("rango") or "fijo", "texto": mod_flujo.describir_repetir_dias(conf),
+                   "n": len(periodos), "desde": periodos[0][0].isoformat() if periodos else "",
+                   "hasta": periodos[-1][1].isoformat() if periodos else ""}
+        g = self.almacen.programacion(clave)
+        prog = g["programacion"] if g and g["programacion"]["reglas"] else None
+        suyo = prog is not None and mod_fechas.es_horario_cada_mes(prog, conf)
+        hoy = self.hoy or datetime.date.today()
+        return {"campos": campos, "por_orden": por_orden, "repetir": rep,
+                "hoy": (hoy.date() if isinstance(hoy, datetime.datetime) else hoy).isoformat(),
+                "cada_mes": {"programado": suyo, "hora": mod_fechas.hora_de(prog) if suyo else mod_fechas.HORA_DEFECTO,
+                             "texto": mod_fechas.describir_cada_mes(prog) if suyo else "",
+                             "otro_horario": horario.describir(prog) if prog is not None and not suyo else ""}}
+
+    def _api_imprimir_reporte(self, rid, metodo, datos):
+        """v3.9: GET / POST {activo, impresora} «Imprimir los PDF que descargue» (impresora vacía = la de Windows)."""
+        if self.almacen.obtener(rid) is None:
+            raise ErrorApi("No existe el reporte %d" % rid, 404)
+        fl = self.almacen.cargar_flujo(rid)
+        if metodo == "POST":
+            conf = mod_flujo.imprimir_pdf({"imprimir_pdf": {"activo": datos.get("activo") is True,
+                                                            "impresora": datos.get("impresora")}})
+            if conf != mod_flujo.imprimir_pdf(fl.opciones):
+                fl.opciones["imprimir_pdf"] = conf
+                self._guardar_flujo(fl, rid)
+            return {"ok": True, "imprimir_pdf": conf}
+        return {"imprimir_pdf": mod_flujo.imprimir_pdf(fl.opciones)}
+
+    # --------------------------------------------- v3.9: «Cada mes: bajar todo e imprimir» (todo en un sitio)
+    def _api_cada_mes(self, rid, metodo, datos):
+        """Una sola ventana con todo: bajar TODAS las opciones de la lista, las fechas del mes anterior, imprimir los
+        PDF y el horario de una vez al mes.  GET → cómo está ahora; POST → lo deja todo puesto (guardando antes una
+        copia del reporte); POST {quitar: true} → lo apaga; POST {probar: true} → lo prueba ahora con una opción."""
+        from . import fechas_reporte as mod_fechas
+        alm = self.almacen
+        fila = alm.obtener(rid)
+        if fila is None:
+            raise ErrorApi("No existe el reporte %d" % rid, 404)
+        fl = alm.cargar_flujo(rid)
+        if metodo == "GET":
+            return self._vista_cada_mes(rid, fila, fl)
+        if metodo != "POST":
+            raise ErrorApi("Método no válido", 405)
+        if datos.get("probar") is True:
+            return self._probar_cada_mes(rid, fila, fl, datos)
+        if datos.get("quitar") is True:
+            return self._quitar_cada_mes(rid, fila, fl)
+        vista = self._vista_cada_mes(rid, fila, fl)
+        otro = vista["cuando"]["otro_horario"]
+        if otro and datos.get("confirmar") is not True:
+            raise ErrorApi("«%s» ya tiene otro horario (%s). Si sigues, se cambia por el de una vez al mes."
+                           % (fila["nombre"], otro))
+        cuando = datos.get("cuando") if isinstance(datos.get("cuando"), dict) else {}
+        modo = str(cuando.get("modo") or "mes")
+        dia = int(cuando.get("dia") or datos.get("dia") or 1)
+        hora = str(cuando.get("hora") or datos.get("hora") or mod_fechas.HORA_DEFECTO)
+        dia_semana = str(cuando.get("dia_semana") or "lun")
+        imprimir = datos.get("imprimir") or {}
+        nuevo = fl.copia()
+        cambios = []
+        try:
+            cambios += self._poner_todas(nuevo, vista, datos.get("todas") is not False)
+            cambios += self._poner_fechas_mes(nuevo, vista, str(datos.get("fechas") or "mes_completo"))
+            cambios += self._poner_imprimir(nuevo, imprimir)
+            p = mod_fechas.programacion_sencilla(modo, dia, hora, dia_semana,
+                                                 ((alm.programacion("reporte:%d" % rid) or {})
+                                                  .get("programacion") or {}).get("ejecucion"))
+        except (mod_fechas.ErrorFechas, ErrorFlujo) as e:
+            raise ErrorApi(str(e))
+        problemas = nuevo.problemas()
+        if problemas:
+            raise ErrorApi("No se pudo dejarlo programado: " + "; ".join(problemas[:3]))
+        if cambios:
+            alm.guardar_version(rid, "antes de programar «cada mes: bajar todo e imprimir»")
+            self._guardar_flujo(nuevo, rid)
+        if p is not None:
+            self._programar(rid, "POST", {"programacion": p, "confirmar": True}, False)
+            cambios.append(mod_fechas.texto_cuando(mod_fechas.como_esta_programado(p)))
+        else:
+            cambios += self._quitar_horario(rid, fila)
+        self._log("«%s»: programación guardada (%s)" % (fila["nombre"], "; ".join(cambios)))
+        res = self._vista_cada_mes(rid, alm.obtener(rid), alm.cargar_flujo(rid))
+        res.update(ok=True, cambios=cambios)
+        return res
+
+    def _poner_todas(self, nuevo, vista, activo):
+        """La lista del reporte, en «todas, una tras otra» (o como estaba, si el usuario lo desmarca)."""
+        lista = vista["lista"]
+        if lista is None:
+            return []
+        p = nuevo.pasos[int(lista["paso"])]
+        if activo and (p.estrategia or "") != "cada_una":
+            p.estrategia, p.valor, p.valores = "cada_una", "", []
+            return ["«%s»: todas las opciones, una tras otra" % lista["nombre"]]
+        if not activo and (p.estrategia or "") == "cada_una":
+            p.estrategia = "primera"
+            return ["«%s»: solo la primera opción" % lista["nombre"]]
+        return []
+
+    def _poner_fechas_mes(self, nuevo, vista, modo):
+        """Las fechas: el mes anterior entero o los mismos días del mes anterior."""
+        from . import fechas_reporte as mod_fechas
+        if modo == "no_tocar" or not vista["fechas"]["campos"]:
+            return []
+        inicio, fin = mod_fechas.mes_anterior(self.hoy)
+        if modo == "mismos_dias" and vista["fechas"]["parcial"]:
+            d, h = vista["fechas"]["parcial"]["desde"], vista["fechas"]["parcial"]["hasta"]
+            inicio = inicio.replace(day=min(d, fin.day))
+            fin = fin.replace(day=min(h, fin.day))
+        return mod_fechas.aplicar_eleccion(nuevo, inicio, fin, cada_mes=True)
+
+    def _poner_imprimir(self, nuevo, imprimir):
+        """«Imprimir los PDF que descargue» con su impresora."""
+        conf = mod_flujo.imprimir_pdf({"imprimir_pdf": {"activo": imprimir.get("activo") is not False,
+                                                        "impresora": imprimir.get("impresora")}})
+        if conf == mod_flujo.imprimir_pdf(nuevo.opciones):
+            return []
+        nuevo.opciones["imprimir_pdf"] = conf
+        if not conf["activo"]:
+            return ["no se imprimirá nada"]
+        return ["imprimir los PDF en «%s»" % (conf["impresora"] or "la impresora de Windows")]
+
+    def _quitar_horario(self, rid, fila):
+        """Quita la tarea de Windows y la programación guardada del reporte (si las tenía)."""
+        alm = self.almacen
+        clave = "reporte:%d" % rid
+        g = alm.programacion(clave)
+        if g is None or not (g["programacion"].get("reglas") or []):
+            return []
+        nombres = [n for n in (_corto(g["tarea"]), fila["nombre"]) if n and n in {t["nombre"] for t in self._tareas()}]
+        if nombres:
+            self._quitar_tareas(nombres, {"confirmar": True}, clave=clave)
+        else:
+            alm.borrar_programacion(clave)
+        return ["ya no se ejecuta solo"]
+
+    def _quitar_cada_mes(self, rid, fila, fl):
+        """Apagarlo: se quita el horario y deja de imprimir (los pasos se quedan como están)."""
+        alm = self.almacen
+        cambios = self._quitar_horario(rid, fila)
+        if mod_flujo.imprimir_pdf(fl.opciones)["activo"]:
+            nuevo = fl.copia()
+            nuevo.opciones["imprimir_pdf"] = {"activo": False, "impresora": mod_flujo.imprimir_pdf(fl.opciones)["impresora"]}
+            alm.guardar_version(rid, "antes de quitar «cada mes: bajar todo e imprimir»")
+            self._guardar_flujo(nuevo, rid)
+            cambios.append("ya no imprime los PDF")
+        self._log("«%s»: quitada la programación (%s)" % (fila["nombre"], "; ".join(cambios) or "nada que quitar"))
+        res = self._vista_cada_mes(rid, alm.obtener(rid), alm.cargar_flujo(rid))
+        res.update(ok=True, cambios=cambios)
+        return res
+
+    def _probar_cada_mes(self, rid, fila, fl, datos):
+        """Ejecuta YA una copia del reporte con lo que hay puesto en la ventana (fechas e impresora), sin cambiar nada
+        de lo guardado: con `todas`, todas las opciones de la lista («Ejecutar ahora»); si no, una sola («Probar»)."""
+        vista = self._vista_cada_mes(rid, fila, fl)
+        nuevo = fl.copia()
+        try:
+            self._poner_fechas_mes(nuevo, vista, str(datos.get("fechas") or "mes_completo"))
+            self._poner_imprimir(nuevo, datos.get("imprimir") or {})
+        except Exception as e:      # noqa: BLE001
+            raise ErrorApi(str(e))
+        lista = vista["lista"]
+        todas = datos.get("todas") is True
+        descripcion = "Probar «%s» con una opción" % fila["nombre"]
+        if lista is not None:
+            p = nuevo.pasos[int(lista["paso"])]
+            if todas:
+                p.estrategia, p.valor, p.valores = "cada_una", "", []
+                descripcion = "Descargar todas las opciones de «%s» de «%s»%s" % (
+                    lista["nombre"], fila["nombre"], (" (%d)" % lista["opciones"]) if lista.get("opciones") else "")
+            else:
+                opciones = [o for o in (lista.get("textos") or []) if o]
+                if opciones:
+                    p.estrategia, p.valor, p.valores = "fija", plantillas.escapar(opciones[0]), []
+                else:
+                    p.estrategia, p.valor, p.valores = "primera", "", []
+        elif todas:
+            descripcion = "Ejecutar «%s» ahora" % fila["nombre"]
+        problemas = nuevo.problemas()
+        if problemas:
+            raise ErrorApi("No se puede ejecutar: " + "; ".join(problemas[:3]))
+        t = self._lanzar_uno(nuevo, rid, datos.get("ver"), False, {}, descripcion=descripcion)
+        return dict(t.a_dict(), ok=True, probando=True, todas=todas)
+
+    def _vista_cada_mes(self, rid, fila, fl):
+        """Cómo está ahora todo lo de la ventana «Cada mes: bajar todo e imprimir»."""
+        from . import fechas_reporte as mod_fechas
+        alm = self.almacen
+        listas = self._listas_todas(rid, fl)
+        lista = None
+        if listas:
+            d = dict(listas[0])
+            paso = fl.pasos[int(d["paso"])]
+            guardadas = [f for f in alm.opciones_filtro(rid, int(d["paso"]))]
+            textos = [o for o in ((guardadas[0]["opciones"] if guardadas else []) or [])
+                      if o and not mod_flujo.es_marcador_de_lista(o)]
+            d.update(activo=(paso.estrategia or "") in mod_flujo.ESTRATEGIAS_BUCLE, textos=textos[:200])
+            lista = d
+        campos, _ = mod_fechas.campos_de_fecha(fl)
+        parcial = mod_fechas.dias_guardados(fl)
+        inicio, fin = mod_fechas.mes_anterior(self.hoy)
+        fechas = {"campos": len(campos), "nombres": [c["nombre"] for c in campos if c["rol"] != "otra"],
+                  "mes_completo": "Bajará el mes anterior entero (del día 1 al último día)",
+                  "parcial": ({"desde": parcial[0], "hasta": parcial[1],
+                               "texto": "Bajará del día %d al %d del mes anterior" % parcial} if parcial else None),
+                  "ejemplo": "si se ejecuta hoy, bajaría del %s al %s" % (inicio.strftime("%d/%m/%Y"), fin.strftime("%d/%m/%Y")),
+                  "ya": all(plantillas.analizar_fecha(c["valor"])["modo"] == "relativa"
+                            for c in campos if c["rol"] != "otra") and bool(campos)}
+        info = self.listar_impresoras()
+        from . import impresion as mod_impresion
+        conf = mod_flujo.imprimir_pdf(fl.opciones)
+        papel = [n for n in info["impresoras"] if not mod_impresion.imprime_a_un_archivo(n)]
+        sugerida = conf["impresora"] or (info["predeterminada"] if info["predeterminada"] in papel else
+                                         (papel[0] if papel else (info["impresoras"][0] if info["impresoras"] else "")))
+        g = alm.programacion("reporte:%d" % rid)
+        prog = g["programacion"] if g and (g["programacion"].get("reglas") or []) else None
+        est = mod_fechas.como_esta_programado(prog)
+        otro = est["otro"]
+        # cuántos archivos baja cada opción (para decir «34 archivos»)
+        dentro = range(int(lista["paso"]) + 1, len(fl.pasos)) if lista else range(len(fl.pasos))
+        por_opcion = len([i for i in dentro if fl.pasos[i].tipo in mod_flujo.TIPOS_QUE_GUARDAN and not fl.pasos[i].desactivado])
+        return {"id": rid, "nombre": fila["nombre"], "lista": lista, "fechas": fechas, "archivos_por_opcion": por_opcion,
+                "imprimir": {"activo": conf["activo"], "impresora": conf["impresora"], "sugerida": sugerida,
+                             "impresoras": info["impresoras"], "predeterminada": info["predeterminada"],
+                             "a_archivo": mod_impresion.imprime_a_un_archivo(conf["impresora"] or sugerida)},
+                "cuando": {"activo": prog is not None, "modo": est["modo"] if not otro else "mes",
+                           "dia": est["dia"], "hora": est["hora"], "dia_semana": est["dia_semana"],
+                           "texto": mod_fechas.texto_cuando(est), "otro_horario": otro}}
+
+    def _api_todas(self, rid, metodo, datos):
+        """v3.9 «Descargar todas»: GET → qué listas se pueden recorrer y cuántas opciones tienen; POST {paso} → ejecuta
+        el reporte una vez por cada opción de esa lista.  El reporte guardado NO cambia (se ejecuta una copia)."""
+        fila = self.almacen.obtener(rid)
+        if fila is None:
+            raise ErrorApi("No existe el reporte %d" % rid, 404)
+        fl = self.almacen.cargar_flujo(rid)
+        listas = self._listas_todas(rid, fl)
+        if metodo == "GET":
+            return {"listas": listas}
+        if metodo != "POST":
+            raise ErrorApi("Método no válido", 405)
+        if not listas:
+            raise ErrorApi("«%s» no tiene ninguna lista de opciones que recorrer: usa «Mapear página» para traer la "
+                           "lista (por ejemplo «Localidad») y vuelve a intentarlo." % fila["nombre"])
+        paso = datos.get("paso")
+        elegida = next((x for x in listas if paso is None or int(x["paso"]) == int(paso)), None)
+        if elegida is None:
+            raise ErrorApi("El paso %s de «%s» no es una lista de opciones" % (paso, fila["nombre"]))
+        copia = fl.copia()
+        p = copia.pasos[int(elegida["paso"])]
+        p.estrategia, p.valor, p.valores = "cada_una", "", []
+        cuantas = int(elegida.get("opciones") or 0)
+        descripcion = "Descargar todas las opciones de «%s» de «%s»%s" % (
+            elegida["nombre"], fila["nombre"], (" (%d)" % cuantas) if cuantas else "")
+        trabajo = self._lanzar_uno(copia, rid, datos.get("ver"), bool(datos.get("lento")),
+                                   {str(k): str(v) for k, v in (datos.get("variables") or {}).items()},
+                                   descripcion=descripcion)
+        return dict(trabajo.a_dict(), lista=elegida["nombre"], opciones=cuantas)
 
     # ------------------------------------------------------- v3.1: usar filtros
     def _panel_filtros(self, rid, elecciones=None):
@@ -1257,7 +1647,7 @@ class Aplicacion:
             return self._lanzar_uno(fl, ids[0], ver, lento, variables).a_dict()
         return self._lanzar_lote(ids, ver, lento, variables).a_dict()
 
-    def _lanzar_uno(self, fl, rid, ver, lento, variables):
+    def _lanzar_uno(self, fl, rid, ver, lento, variables, descripcion=None):
         problemas = fl.problemas()
         if problemas:
             raise ErrorApi("El reporte tiene errores: " + "; ".join(problemas[:3]))
@@ -1279,7 +1669,7 @@ class Aplicacion:
             if cadena is None:
                 return res.ok, res.resumen()
             return res.ok and cadena.ok, res.resumen() + "\n" + cadena.resumen()
-        return self.lanzar("ejecutar", "Ejecutar «%s»" % fl.nombre, trabajo, reporte_id=rid)
+        return self.lanzar("ejecutar", descripcion or ("Ejecutar «%s»" % fl.nombre), trabajo, reporte_id=rid)
 
     def _ejecutar_cadena(self, t, fl, rid, ok, ver, lento, variables):
         """v3.9: los reportes de «Al terminar, ejecutar…» tras una ejecución suelta (en el mismo trabajo)."""
@@ -1311,7 +1701,8 @@ class Aplicacion:
             def fabrica(fl, **kw):
                 from .ejecutor import Ejecutor
                 kw.update(progreso=lambda i, estado, texto="": self._progreso(t, i, estado, texto, fl.nombre),
-                          notificar=self._notificar)
+                          notificar=self._notificar, imprimir=self.imprimir_archivo,
+                          lista_descargas=self._avisar_descargas(t, kw.get("reporte_id")))
                 return Ejecutor(fl, **kw)
             res = lote.ejecutar_lote(ids, carpeta_perfiles=self.carpeta_perfiles, carpeta_registros=self.carpeta_registros,
                                      carpeta_descargas=self.carpeta_descargas, oculto=self._oculto(v), lento=lento,
@@ -2877,6 +3268,22 @@ class Aplicacion:
                 raise ErrorApi(str(e))
             return {"ok": True, "impresora": usada, "archivo": os.path.basename(ruta)}
         raise ErrorApi("Acción no válida", 404)
+
+    def _api_programados(self, metodo, partes, datos, q):
+        """v3.9: los reportes que se ejecutan solos, para enseñarlos en Vigilancia (qué bajan y si imprimen)."""
+        res = []
+        for fila in self.almacen.listar():
+            rid = int(fila["id"])
+            try:
+                fl = self.almacen.cargar_flujo(rid)
+            except Exception:              # noqa: BLE001 (un reporte dañado no estropea la lista)
+                continue
+            est = self._estado_cada_mes(rid, fl)
+            if not est["activo"]:
+                continue
+            res.append({"id": rid, "nombre": fila["nombre"], "texto": est["texto"], "imprime": est["imprime"],
+                        "modo": est["modo"], "dia": est["dia"], "hora": est["hora"]})
+        return {"reportes": res}
 
     def _api_impresoras(self, metodo, partes, datos, q):
         """v3.9: GET impresoras → {impresoras: [nombres], predeterminada} (para el paso «Imprimir»)."""

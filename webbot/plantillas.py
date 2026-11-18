@@ -20,6 +20,8 @@ Ejemplos de uso dentro de cualquier texto de un paso:
                                   «Repetir por días», ese día; sin repetir, hoy).  {desde:%Y-%m-%d} con formato.
     {inicio_quincena_anterior} {fin_quincena_anterior}   (v3.9) la última quincena ya terminada (corte: el día 15 o el
                                   que elija el usuario)
+    {dia_mes_anterior:15}      -> (v3.9) el día 15 del mes anterior; si ese mes no tiene ese día (30 en febrero), su último
+                                  día.  {dia_mes_anterior:15:%Y-%m-%d} con formato
     {opcion}                   -> (v3.0) texto de la última opción elegida por un paso «Elegir opción»
     {{  y  }}                  -> llaves literales
 """
@@ -36,7 +38,8 @@ FECHAS = ("hoy", "ayer", "inicio_mes", "fin_mes", "inicio_mes_anterior", "fin_me
           # v3.9: la última quincena ya terminada (el mes se parte en el día de corte: el 15 si no se dice otro)
           "inicio_quincena_anterior", "fin_quincena_anterior")
 PERIODO = ("desde", "hasta")         # v3.9: inicio y fin del periodo que se descarga (Repetir por meses / quincenas)
-RESERVADAS = set(FECHAS) | {"dias", "ext", "nombre", "secreto", "fecha", "opcion", "reporte"} | set(PERIODO)
+DIA_MES_ANTERIOR = "dia_mes_anterior"     # v3.9: {dia_mes_anterior:N} = el día N del mes anterior
+RESERVADAS = set(FECHAS) | {"dias", "ext", "nombre", "secreto", "fecha", "opcion", "reporte", DIA_MES_ANTERIOR} | set(PERIODO)
 CORTE_QUINCENA = 15                  # v3.9: día en que empieza la 2.ª quincena (si el reporte no dice otro)
 
 AYUDA_PLANTILLAS = [
@@ -50,6 +53,7 @@ AYUDA_PLANTILLAS = [
     ("{fin_mes}", "Último día de este mes"),
     ("{inicio_mes_anterior}", "Primer día del mes anterior"),
     ("{fin_mes_anterior}", "Último día del mes anterior"),
+    ("{dia_mes_anterior:15}", "Día 15 del mes anterior (si no existe, su último día)"),
     ("{lunes_semana}", "Lunes de esta semana"),
     ("{lunes_semana_anterior}", "Lunes de la semana pasada"),
     ("{domingo_semana_anterior}", "Domingo de la semana pasada"),
@@ -120,6 +124,20 @@ def quincena_anterior(hoy=None, corte=CORTE_QUINCENA, mitades=(1, 2)):
                 return d, h
         anio, mes = (anio, mes - 1) if mes > 1 else (anio - 1, 12)
     raise ErrorPlantilla("No se pudo calcular la quincena anterior")
+
+
+def dia_del_mes_anterior(hoy, n):
+    """v3.9: el día `n` (1–31) del mes anterior a `hoy`, como datetime.date; si ese mes no tiene ese día, su último día
+    (30 → 28 o 29 en febrero; 31 = siempre el último día)."""
+    base = _como_fecha(hoy).date()
+    try:
+        n = int(n)
+    except (TypeError, ValueError):
+        raise ErrorPlantilla("{dia_mes_anterior:N} necesita el número del día (de 1 a 31)")
+    if not 1 <= n <= 31:
+        raise ErrorPlantilla("{dia_mes_anterior:N}: el día debe estar entre 1 y 31 (llegó %s)" % n)
+    fin = base.replace(day=1) - datetime.timedelta(days=1)
+    return fin.replace(day=min(n, fin.day))
 
 
 def _fecha_nombrada(nombre, ahora, corte=CORTE_QUINCENA):
@@ -230,6 +248,13 @@ def renderizar(texto, variables=None, hoy=None, ext=None, nombre=None,
         elif nombre_var == "fecha":
             dia = _como_fecha(fecha) if fecha is not None else ahora
             partes.append(_formatear(dia, resto if resto else formato_defecto))
+        elif nombre_var == DIA_MES_ANTERIOR:              # v3.9: {dia_mes_anterior:15[:formato]}
+            cantidad, _, formato = resto.partition(":")
+            if not cantidad.strip().isdigit():
+                raise ErrorPlantilla("{dia_mes_anterior:N} necesita el número del día, por ejemplo "
+                                     "{dia_mes_anterior:15}: {%s}" % cont)
+            d = dia_del_mes_anterior(ahora, int(cantidad.strip()))
+            partes.append(_formatear(datetime.datetime(d.year, d.month, d.day), formato if formato else formato_defecto))
         elif nombre_var == "dias":
             cantidad, _, formato = resto.partition(":")
             try:
@@ -405,6 +430,7 @@ _NOMBRES_RELATIVAS = dict(RELATIVAS)
 _FORMATOS_FIJA = ("%d/%m/%Y", "%Y-%m-%d", "%d-%m-%Y", "%d.%m.%Y", "%Y/%m/%d", "%d/%m/%y", "%m/%d/%Y", "%d %b %Y")
 _RX_RELATIVA = re.compile(r"^\{(%s|fecha|desde|hasta)(?::([^{}]+))?\}$" % "|".join(FECHAS))
 _RX_DIAS = re.compile(r"^\{dias:\s*([+-]?\d+)\s*(?::([^{}]+))?\}$")
+_RX_DIA_MES = re.compile(r"^\{dia_mes_anterior:\s*(\d{1,2})\s*(?::([^{}]+))?\}$")
 
 
 def _formato_valido(formato):
@@ -434,6 +460,9 @@ def analizar_fecha(texto):
     m = _RX_DIAS.match(s)
     if m and (m.group(2) is None or _formato_valido(m.group(2))):
         return {"modo": "relativa", "que": "dias", "n": int(m.group(1)), "formato": m.group(2)}
+    m = _RX_DIA_MES.match(s)
+    if m and 1 <= int(m.group(1)) <= 31 and (m.group(2) is None or _formato_valido(m.group(2))):
+        return {"modo": "relativa", "que": DIA_MES_ANTERIOR, "n": int(m.group(1)), "formato": m.group(2)}
     if s == t and "{" not in s and "}" not in s:
         for formato in _FORMATOS_FIJA:
             try:
@@ -469,6 +498,14 @@ def plantilla_fecha(a):
             except (TypeError, ValueError):
                 raise ErrorPlantilla("«Hace N días» necesita un número")
             return "{dias:%d%s}" % (n, (":" + formato) if formato else "")
+        if que == DIA_MES_ANTERIOR:
+            try:
+                n = int(a.get("n"))
+            except (TypeError, ValueError):
+                raise ErrorPlantilla("«Día N del mes anterior» necesita un número")
+            if not 1 <= n <= 31:
+                raise ErrorPlantilla("«Día N del mes anterior»: el día debe estar entre 1 y 31")
+            return "{%s:%d%s}" % (DIA_MES_ANTERIOR, n, (":" + formato) if formato else "")
         if que not in FECHAS and que not in ("fecha",) + PERIODO:
             raise ErrorPlantilla("Fecha desconocida: %s" % que)
         return "{%s%s}" % (que, (":" + formato) if formato else "")
@@ -501,6 +538,36 @@ def describir_fecha(texto, hoy=None):
         n = a["n"]
         palabras = "hoy" if n == 0 else ("hace %d día%s" % (-n, "" if n == -1 else "s") if n < 0 else
                                          "dentro de %d día%s" % (n, "" if n == 1 else "s"))
+    elif a["que"] == DIA_MES_ANTERIOR:
+        palabras = "día %d del mes anterior" % a["n"]
     else:
         palabras = _NOMBRES_RELATIVAS.get(a["que"], a["que"])
     return "%s · %s" % (palabras, vista)
+
+
+# --- v3.9: «Descargar en esta fecha cada mes» ---------------------------------------------------------------------
+def plantilla_cada_mes(dia, formato=None):
+    """La fecha elegida en el calendario (datetime.date) → esa fecha DEL MES ANTERIOR al día en que se ejecute: el día
+    1 → {inicio_mes_anterior}; el último día de su mes (31/10, 30/11, 28/02…) → {fin_mes_anterior}; otro día N →
+    {dia_mes_anterior:N} (si el mes anterior no tiene ese día, su último día).  Con el formato del campo."""
+    fin = calendar.monthrange(dia.year, dia.month)[1]
+    if dia.day == 1:
+        a = {"modo": "relativa", "que": "inicio_mes_anterior", "n": None, "formato": formato}
+    elif dia.day == fin:
+        a = {"modo": "relativa", "que": "fin_mes_anterior", "n": None, "formato": formato}
+    else:
+        a = {"modo": "relativa", "que": DIA_MES_ANTERIOR, "n": dia.day, "formato": formato}
+    return plantilla_fecha(a)
+
+
+def misma_fecha(a, b):
+    """True si dos valores guardados son la misma fecha («{ayer}» = «{ayer:%d/%m/%Y}»: el formato por defecto escrito o
+    no)."""
+    x, y = analizar_fecha(a), analizar_fecha(b)
+    if x["modo"] != y["modo"]:
+        return False
+    if x["modo"] in ("fija", "relativa"):
+        def clave(z):
+            return z.get("fecha"), z.get("que"), z.get("n"), z.get("formato") or FORMATO_FECHA
+        return clave(x) == clave(y)
+    return str(a or "") == str(b or "")

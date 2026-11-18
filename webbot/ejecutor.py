@@ -23,6 +23,7 @@ Hilos: debe ejecutarse entero en un solo hilo (el que llama a `ejecutar()`).  `p
 desde ese hilo; la ventana contesta por su cola (ver bot.App._pedir_acceso).
 """
 
+import base64
 import csv
 import datetime
 import html
@@ -142,6 +143,129 @@ JS_DX_PONER_FECHA = r"""(el, f) => {
   c.SetDate(new w.Date(f[0], f[1] - 1, f[2]));
   const d = c.GetDate();
   return { ok: !!d && d.getFullYear() === f[0] && d.getMonth() === f[1] - 1 && d.getDate() === f[2], texto: el.value || '' };
+}"""
+# v3.9: otros calendarios con su propia «memoria» de la fecha (bootstrap-datepicker, jQuery UI, flatpickr, Kendo) y el
+# <input type=date> del navegador.  Escribir solo el texto no basta: p. ej. bootstrap-datepicker (portal de Pagos) no se
+# entera de lo escrito y, al cerrarse el calendario con el siguiente clic, vuelve a poner en el campo SU fecha.  Se pone
+# la fecha con el propio calendario, se cierra y se comprueba que el calendario tiene ESA fecha.  `a` = [texto, [a, m, d]
+# o null].  Si el calendario entiende el texto como otra fecha (p. ej. mm/dd) y al escribirla la deja igual que el
+# texto, manda el calendario.  null si el campo no es uno de estos calendarios.
+JS_CALENDARIO_PONER_FECHA = r"""(el, a) => {
+  const w = el.ownerDocument.defaultView, texto = a[0], f = a[1], $ = w.jQuery;
+  const valida = (d) => (d instanceof w.Date || d instanceof Date) && !isNaN(d.getTime()) ? d : null;
+  const igual = (x, y) => !!(x && y) && x.getFullYear() === y.getFullYear() && x.getMonth() === y.getMonth() && x.getDate() === y.getDate();
+  const ver = (d) => d ? [d.getFullYear(), d.getMonth() + 1, d.getDate()] : null;
+  const datos = (n, k) => { try { return $ ? $(n).data(k) : null; } catch (e) { return null; } };
+  let cal = null;
+  // bootstrap-datepicker: en el campo o en su contenedor (.input-group.date)
+  for (let n = el, k = 0; n && n.nodeType === 1 && k < 4 && !cal; n = n.parentElement, k++) {
+    const dp = datos(n, 'datepicker');
+    if (dp && typeof dp.setDate === 'function' && typeof dp.getDate === 'function' && typeof dp.update === 'function') {
+      cal = { tipo: 'bootstrap-datepicker',
+        leer: (t) => { el.value = t; dp.update(); return valida(dp.getDate()); },
+        texto: () => (typeof dp.getFormattedDate === 'function' ? dp.getFormattedDate() : el.value),
+        poner: (d) => dp.setDate(d), fecha: () => (dp.dates && dp.dates.length === 0 ? null : valida(dp.getDate())),
+        cerrar: () => { if (typeof dp.hide === 'function') dp.hide(); } };
+    }
+  }
+  if (!cal && $ && $.datepicker && el.classList && el.classList.contains('hasDatepicker')) {      // jQuery UI
+    const fmt = () => $(el).datepicker('option', 'dateFormat');
+    cal = { tipo: 'jQuery UI',
+      leer: (t) => { try { return valida($.datepicker.parseDate(fmt(), t)); } catch (e) { return null; } },
+      texto: (d) => $.datepicker.formatDate(fmt(), d),
+      poner: (d) => { $(el).datepicker('setDate', d); $(el).trigger('change'); },
+      fecha: () => valida($(el).datepicker('getDate')), cerrar: () => $(el).datepicker('hide') };
+  }
+  if (!cal) {                                                                                      // flatpickr
+    let fp = el._flatpickr || null;
+    if (!fp) for (const i of el.ownerDocument.querySelectorAll('input')) if (i._flatpickr && i._flatpickr.altInput === el) fp = i._flatpickr;
+    if (fp && typeof fp.setDate === 'function') {
+      const fmt = fp.config.altInput && fp.altInput === el ? fp.config.altFormat : fp.config.dateFormat;
+      cal = { tipo: 'flatpickr',
+        leer: (t) => { try { return valida(fp.parseDate(t, fmt)); } catch (e) { return null; } },
+        texto: (d) => fp.formatDate(d, fmt), poner: (d) => fp.setDate(d, true),
+        fecha: () => valida(fp.selectedDates[fp.selectedDates.length - 1]), cerrar: () => fp.close() };
+    }
+  }
+  if (!cal && w.kendo) {                                                                           // Kendo UI
+    const kd = datos(el, 'kendoDatePicker') || datos(el, 'kendoDateTimePicker');
+    if (kd && typeof kd.value === 'function') {
+      const fmt = kd.options && kd.options.format;
+      cal = { tipo: 'Kendo',
+        leer: (t) => { try { return valida(w.kendo.parseDate(t, fmt)); } catch (e) { return null; } },
+        texto: (d) => w.kendo.toString(d, fmt), poner: (d) => { kd.value(d); kd.trigger('change'); },
+        fecha: () => valida(kd.value()), cerrar: () => { if (typeof kd.close === 'function') kd.close(); } };
+    }
+  }
+  if (!cal && el.tagName === 'INPUT' && (el.type || '').toLowerCase() === 'date') {               // del navegador
+    const iso = (d) => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+    const leerIso = (t) => { const m = /^(\d{4})-(\d\d)-(\d\d)$/.exec(String(t || '').trim()); return m ? new w.Date(+m[1], +m[2] - 1, +m[3]) : null; };
+    cal = { tipo: 'del navegador', leer: leerIso, texto: iso,
+      poner: (d) => {
+        const s = Object.getOwnPropertyDescriptor(w.HTMLInputElement.prototype, 'value').set;
+        s.call(el, iso(d));
+        el.dispatchEvent(new w.Event('input', { bubbles: true }));
+        el.dispatchEvent(new w.Event('change', { bubbles: true }));
+      },
+      fecha: () => leerIso(el.value), cerrar: () => {} };
+  }
+  if (!cal) return null;
+  let objetivo = f ? new w.Date(f[0], f[1] - 1, f[2]) : null;
+  let leida = null;
+  try { leida = cal.leer(texto); } catch (e) { leida = null; }
+  let texto_leida = null;
+  try { texto_leida = leida ? cal.texto(leida) : null; } catch (e) { texto_leida = null; }
+  if (leida && (!objetivo || (!igual(leida, objetivo) && texto_leida === texto))) objetivo = leida;
+  if (!objetivo) return { tipo: cal.tipo, ok: false, sin_fecha: true };
+  try { cal.poner(objetivo); } catch (e) { return { tipo: cal.tipo, ok: false, error: String(e).slice(0, 120) }; }
+  try { cal.cerrar(); } catch (e) { /* el calendario ya estaba cerrado */ }
+  let final = null;
+  try { final = cal.fecha(); } catch (e) { final = null; }
+  return { tipo: cal.tipo, ok: igual(final, objetivo) && !!el.value, texto: el.value || '', fecha: ver(final), pedida: ver(objetivo) };
+}"""
+# v3.9: botones del visor de PDF del navegador (no son de la página: «Download», «Print», «Save»)
+RX_BOTON_VISOR_PDF = re.compile(r"#(save|download|print)\b|cr-icon-button|viewer-(download|print)|"
+                                r"\[id=[\"']?(save|download|print)[\"']?\]", re.IGNORECASE)
+# v3.9: un clic grabado dentro de un calendario (día, mes anterior/siguiente…): sus selectores lo delatan
+RX_SELECTOR_CALENDARIO = re.compile(r"datepicker|calendar|flatpickr|daterangepicker|pika-|picker-|xdsoft", re.IGNORECASE)
+# … y lo pulsado es una pieza del calendario: un día, un año, una flecha o un mes (no p. ej. un comercio de una lista
+# que reutiliza el estilo «datepicker»)
+RX_OBJETIVO_CALENDARIO = re.compile(r"\d{1,4}|[«»‹›<>←→↑↓\u2039\u203a]{1,2}|(?:prev|next|anterior|siguiente|hoy|today)\w*|"
+                                    r"(?:ene|feb|mar|abr|may|jun|jul|ago|sep|oct|nov|dic|jan|apr|aug|dec)\w*(?: \d{4})?",
+                                    re.IGNORECASE)
+# v3.9: cuando la web abre el PDF en otra pestaña (visor de Chrome) el bot guarda su contenido y la cierra: con «para
+# cada opción» eso era una pestaña que se abría y se cerraba (y se ponía delante) por cada comercio.  Este script
+# envuelve `window.open`: si la dirección es un PDF que el bot ya sabe pedir (o se espera uno), NO se abre ninguna
+# pestaña; se le pasa la dirección al bot (que lo pide con la sesión del navegador) y se devuelve una ventana de
+# pega para que la página siga sin enterarse.  Si algo falla, se abre como siempre.
+JS_PDF_SIN_PESTANA = r"""(() => {
+  if (window.__botOpenOriginal) return;
+  window.__botRutasPdf = window.__botRutasPdf || [];
+  window.__botPdfEsperado = false;
+  const original = window.open;
+  window.__botOpenOriginal = original;
+  const ventanaDePega = (href) => ({ closed: false, close() {}, focus() {}, blur() {}, print() {}, postMessage() {},
+    opener: window, document: null, location: { href: href, replace() {}, assign() {} } });
+  window.open = function (u) {
+    try {
+      const url = u ? new URL(String(u), location.href).href : '';
+      const toca = !!url && /^https?:/.test(url) &&
+        (window.__botPdfEsperado || window.__botRutasPdf.some((r) => r && url.indexOf(r) === 0));
+      if (toca && window.__botPdfAbierto) {
+        window.__botPdfAbierto(url);
+        return ventanaDePega(url);
+      }
+    } catch (e) { /* se abre como siempre */ }
+    return original.apply(window, arguments);
+  };
+})()"""
+# v3.9: PDF que se abre en una pestaña (visor de Chrome): lee un blob:/data: desde la propia página (en base64)
+JS_LEER_BLOB = r"""async (u) => {
+  const r = await fetch(u);
+  const b = new Uint8Array(await r.arrayBuffer());
+  let s = '';
+  for (let i = 0; i < b.length; i += 0x8000) s += String.fromCharCode.apply(null, b.subarray(i, i + 0x8000));
+  return btoa(s);
 }"""
 # v3.6.1: lo que dice el formato de fecha de una casilla antes de escribir (su valor y su placeholder)
 JS_PISTAS_FECHA = "e => ({valor: ('value' in e && !e.isContentEditable) ? (e.value || '') : '', " \
@@ -312,8 +436,15 @@ JS_OPCIONES = r"""(c, a) => {
   if (!lista) return res;
   let ops = Array.from(lista.querySelectorAll(SEL_OPCION)).filter((o) => vis(o) && !o.contains(c));
   ops = ops.filter((o) => !ops.some((x) => x !== o && x.contains(o)));        // la opción de fuera, no sus piezas
+  // v3.9: si las opciones llevan un control (radio, enlace, botón…), una fila sin ninguno es la cabecera de un grupo
+  // (p. ej. el nombre de la empresa encima de sus comercios), no una opción
+  const control = (o) => !!o.querySelector('input[type=radio],input[type=checkbox],a[href],button,[role=option],[role=menuitem]');
+  const conControl = ops.filter(control).length;
   for (const o of ops) {
-    if (o.getAttribute('aria-disabled') === 'true' || /subheader|divider|disabled|header/i.test(clase(o))) continue;
+    if (o.getAttribute('aria-disabled') === 'true' || /subheader|divider|disabled|header|optgroup|group-?label/i.test(clase(o))) continue;
+    if (/^(separator|presentation|group)$/.test(o.getAttribute('role') || '')) continue;
+    if (o.querySelector('textarea, input:not([type=radio]):not([type=checkbox]):not([type=hidden]):not([type=button]):not([type=submit])')) continue;   // v3.9: el buscador de la lista
+    if (conControl >= 2 && !control(o)) continue;
     const t = norm(o.innerText || o.textContent);
     if (!t) continue;
     res.textos.push(t);
@@ -706,6 +837,7 @@ class ResultadoEjecucion:
         self.periodos = []         # v3.9: [(desde, hasta)] de «Repetir por meses / quincenas» (vacío = no)
         self.opciones_bucle = []   # v3.9: «para cada opción»: [{paso, lista, bien: [textos], fallos: [(texto, motivo)]}]
         self.impresiones = []      # v3.9: lo que mandó a imprimir el paso «Imprimir»: [{archivo, impresora}]
+        self.sin_imprimir = []     # v3.9: «Imprimir los PDF…»: los PDF que no se pudieron imprimir [(archivo, motivo)]
 
     def resumen(self):
         if self.ok:
@@ -719,15 +851,24 @@ class ResultadoEjecucion:
             elif self.dias:
                 txt = "Terminado: %d días (%s a %s), %d pasos" % (
                     len(self.dias), self.dias[0].strftime("%d/%m/%Y"), self.dias[-1].strftime("%d/%m/%Y"), self.completados)
+            elif self.opciones_bucle:
+                # v3.9: «para cada opción»: los pasos se repiten, así que «N de M pasos» no tendría sentido
+                primero = min(b["paso"] for b in self.opciones_bucle)
+                fuera = [b for b in self.opciones_bucle if b["paso"] == primero]
+                n = sum(len(b["bien"]) for b in fuera)
+                txt = "Terminado: %d %s de %s, %d pasos" % (n, "opción" if n == 1 else "opciones", fuera[0]["lista"],
+                                                            self.completados)
             else:
                 txt = "Terminado: %d de %d pasos" % (self.completados, self.total - self.desactivados - self.sin_valor)
             extra = []
             if self.omitidos:
                 extra.append("%d opcionales omitidos" % self.omitidos)
-            if self.desactivados:
+            if self.desactivados and not self.opciones_bucle:      # (en las repeticiones se contarían varias veces)
                 extra.append("%d desactivados" % self.desactivados)
             if self.sin_valor:
                 extra.append("%d sin valor, saltados" % self.sin_valor)
+            if self.sin_imprimir:
+                extra.append("%d PDF sin imprimir" % len(self.sin_imprimir))
             if extra:
                 txt += " (%s)" % ", ".join(extra)
             if self.archivos:
@@ -777,6 +918,24 @@ def ruta_libre(ruta, ext=None):
     return "%s (%d)%s" % (base, n, ext)
 
 
+def es_pdf(datos):
+    """v3.9: ¿estos bytes son un PDF?"""
+    return bool(datos) and datos[:1024].lstrip().startswith(b"%PDF")
+
+
+def nombre_pdf(cabecera, url):
+    """v3.9: nombre de un PDF abierto en una pestaña: el de la cabecera Content-Disposition («filename=Reporte.pdf;»),
+    el final de la dirección o «documento.pdf»."""
+    from urllib.parse import unquote, urlparse
+    m = re.search(r"filename\*\s*=\s*(?:[\w-]+'[\w-]*')?\"?([^\";]+)", cabecera or "", re.IGNORECASE) or \
+        re.search(r"filename\s*=\s*\"?([^\";]+)", cabecera or "", re.IGNORECASE)
+    nombre = unquote(m.group(1)).strip() if m else ""
+    if not nombre and str(url or "").lower().startswith(("http://", "https://")):
+        nombre = unquote(os.path.basename(urlparse(url).path or "")).strip()
+    nombre = nombre or "documento"
+    return nombre if nombre.lower().endswith(".pdf") else nombre + ".pdf"
+
+
 def inyectar_base(contenido, url):
     """Añade <base href="url"> al HTML (si no la tiene) para que una copia guardada encuentre sus recursos."""
     if not url or not url.lower().startswith(("http://", "https://")) or re.search(r"<base\b", contenido, re.I):
@@ -798,7 +957,8 @@ class Ejecutor:
                  aviso_cada=AVISO_CADA, pausa_entre_pasos=None, forzar_pdf_auxiliar=False, recuperacion=None,
                  pedir_acceso=None, accesos=None, esperar_carga=None, espera_red_max=ESPERA_RED_MAX,
                  espera_estancada=ESPERA_ESTANCADA, espera_estancada_debil=ESPERA_ESTANCADA_DEBIL,
-                 hasta=None, al_final=None, dias=None, notificar=None, reporte_id=None, filtros=None, solo_leer=False):
+                 hasta=None, al_final=None, dias=None, notificar=None, reporte_id=None, filtros=None, solo_leer=False,
+                 imprimir=None, lista_descargas=None):
         # v3.1: `filtros` = {paso: {estrategia, valor}} solo para esta ejecución (no cambia el reporte guardado);
         # `solo_leer` («Actualizar opciones»): si la opción elegida no está en una lista, se elige la primera para seguir
         # leyendo las listas siguientes.
@@ -827,6 +987,11 @@ class Ejecutor:
         self._archivo_log = None
         self.paginas = []
         self._descargas = []
+        self._descargas_usadas = set()  # v3.9: descargas ya guardadas por un paso (id del objeto)
+        self._respuestas_pdf = {}       # v3.9: dirección -> respuesta de un documento PDF (pestaña con el visor de PDF)
+        self._pestanas_pdf_cerradas = set()   # v3.9: pestañas de PDF que cerró el bot (ver _pestana_nueva_tras)
+        self._rutas_pdf = []            # v3.9: direcciones (sin la parte de después de «?») que ya dieron un PDF
+        self._urls_pdf_pedidas = []     # v3.9: PDF que la web quiso abrir en otra pestaña y el bot pide él mismo
         self._pagina_activa = -1
         self._indice_actual = 0
         self._pw = None
@@ -870,6 +1035,13 @@ class Ejecutor:
         self.fecha = None
         self.periodo = None             # v3.9: (desde, hasta) del pase en curso ({desde} y {hasta})
         self._fallos_bucle = []         # v3.9: opciones de «para cada opción» que fallaron (se sigue con las demás)
+        # v3.9: «Imprimir los PDF que descargue»: imprimir(ruta, impresora, log) (None = impresion.imprimir_archivo); y
+        # la lista de todo lo que baja una ejecución grande: lista_descargas(datos) en cada cambio (ver lista_descargas)
+        self._imprimir = imprimir
+        self._avisar_lista = lista_descargas
+        self._lista = None
+        self._k_lista = None            # el «para cada opción» de la lista (el primero del reporte)
+        self._pase = 0                  # el pase (día / periodo) en curso, para la lista
         self._notificar = notificar
         self.reporte_id = reporte_id
         self._rechazo_previo = None
@@ -973,6 +1145,8 @@ class Ejecutor:
                 raise ErrorPaso("La pestaña %d todavía no se ha abierto" % (indice + 1))
             self._pausa(SONDEO)
         pg = self.paginas[indice]
+        if pg.is_closed() and indice in self._pestanas_pdf_cerradas:
+            indice, pg = self._pestana_nueva_tras(indice, fin)       # v3.9
         if pg.is_closed():
             raise ErrorPaso("La pestaña %d ya está cerrada" % (indice + 1))
         if indice != self._pagina_activa:
@@ -983,6 +1157,18 @@ class Ejecutor:
                 except Exception:
                     pass
         return pg
+
+    def _pestana_nueva_tras(self, indice, fin):
+        """v3.9: la pestaña `indice` era la de un PDF que el bot ya guardó y cerró; al repetir los pasos («para cada
+        opción», periodos…) el PDF se abre en otra pestaña nueva: se usa la más reciente abierta después de ella."""
+        while True:
+            for j in range(len(self.paginas) - 1, indice, -1):
+                if not self.paginas[j].is_closed():
+                    return j, self.paginas[j]
+            if time.monotonic() >= fin:
+                return indice, self.paginas[indice]
+            self._comprobar_detener()
+            self._pausa(SONDEO)
 
     def _alcance(self, paso, timeout):
         pg = self._pagina(paso.pagina, timeout)
@@ -1152,6 +1338,9 @@ class Ejecutor:
             self._dormir(max(0.0, float(paso.segundos)))
             return
 
+        if t == "descargar" and self._urls_pdf_pedidas and self._pdf_sin_pestana(paso):
+            return          # v3.9: el PDF que abría la web ya se pidió y se guardó: no hay ninguna pestaña que esperar
+
         if t == "imprimir" and (paso.que_imprimir or "archivo") == "archivo":    # v3.9: no necesita la página
             self._paso_imprimir(paso, None, timeout)
             return
@@ -1245,6 +1434,8 @@ class Ejecutor:
             return
 
         if t == "clic":
+            if self._clic_en_visor_pdf(pg, paso):      # v3.9: botón del visor de PDF (no es de la página)
+                return
             boton = {"izquierdo": "left", "derecho": "right", "medio": "middle"}[paso.boton]
 
             def hacer_clic(loc, ms):
@@ -1384,6 +1575,8 @@ class Ejecutor:
                 visible = habil = None          # la página se está redibujando
             objetivo = habil or visible
             if objetivo is not None and valor and self._tiene_valor(objetivo, valor):
+                if self._fecha_calendario(objetivo, valor):      # v3.9: el calendario también debe tenerla
+                    return
                 self._log("    (el campo ya tenía el valor: no hace falta escribir)")
                 return
             forzar = False
@@ -1432,6 +1625,8 @@ class Ejecutor:
             return
         if self._fecha_devexpress(loc, valor):
             return
+        if self._fecha_calendario(loc, valor):
+            return
         if not solo_lectura:
             try:
                 pistas = loc.evaluate(JS_PISTAS_FECHA)
@@ -1472,6 +1667,32 @@ class Ejecutor:
         if not r.get("ok"):
             raise ErrorPaso("El calendario no aceptó la fecha «%s» (¿está fuera de las fechas que permite?)" % valor)
         self._log("    (calendario de DevExpress: fecha puesta en el calendario; se ve «%s»)" % self._limpiar(str(r.get("texto") or ""))[:30])
+        return True
+
+    def _fecha_calendario(self, loc, valor):
+        """v3.9: si el campo es un calendario que guarda la fecha por su cuenta (bootstrap-datepicker, jQuery UI,
+        flatpickr, Kendo) o un campo de fecha del navegador, pone la fecha con el propio calendario y comprueba que la
+        tiene.  True si quedó puesta; False para seguir escribiendo como siempre.  Si el calendario no la acepta, el
+        paso falla con un mensaje claro (antes se seguía y la web usaba otra fecha sin avisar)."""
+        from playwright.sync_api import Error as ErrorPW
+        texto = str(valor or "").strip()
+        if not texto or len(texto) > 40 or not re.search(r"\d", texto):
+            return False
+        fecha, _formato = leer_fecha(texto)
+        try:
+            r = loc.evaluate(JS_CALENDARIO_PONER_FECHA, [texto, [fecha.year, fecha.month, fecha.day] if fecha else None])
+        except ErrorPW:
+            return False
+        if not r or r.get("sin_fecha"):
+            return False
+        tipo = r.get("tipo") or ""
+        if not r.get("ok"):
+            queda = self._limpiar(str(r.get("texto") or ""))[:30]
+            raise ErrorPaso("El calendario de la página (%s) no aceptó la fecha «%s»%s. Puede que esté fuera de las "
+                            "fechas que permite; revisa la fecha de este paso." % (
+                                tipo, valor, (": el campo se quedó con «%s»" % queda) if queda else ""))
+        self._log("    (calendario %s: fecha puesta con el propio calendario; se ve «%s»)"
+                  % (tipo, self._limpiar(str(r.get("texto") or ""))[:30]))
         return True
 
     @staticmethod
@@ -3220,7 +3441,15 @@ class Ejecutor:
     def _descargar(self, paso, pg, scope, espera):
         """`espera` (timeout_descarga) vale para esperar al botón (visible y habilitado) y luego al archivo."""
         antes = len(self._descargas)
-        if paso.selectores:
+        if self._pdf_sin_pestana(paso):          # v3.9: el PDF ya se pidió sin abrir ninguna pestaña
+            return
+        previo = self._pdf_ya_abierto(paso, pg, scope, time.monotonic() + espera, antes)     # v3.9
+        if previo is True:
+            return
+        if previo is not None:              # la pestaña ya descargó el PDF (navegador que no lo enseña): ese archivo
+            antes = previo
+        paginas_antes, url_antes = len(self.paginas), pg.url
+        if paso.selectores and previo is None:
             boton = {"izquierdo": "left", "derecho": "right", "medio": "middle"}[paso.boton]
 
             def hacer_clic(loc, ms):
@@ -3242,8 +3471,11 @@ class Ejecutor:
                 self._log("    " + texto)
                 self.progreso(self._indice_actual, "espera", texto)
                 proximo_aviso += self.aviso_cada
+            if self._pdf_tras_clic(paso, pg, paginas_antes, url_antes):          # v3.9
+                return
             self._pausa(0.25)
         descarga = self._descargas[antes]
+        self._descargas_usadas.add(id(descarga))
         sugerido = descarga.suggested_filename or "descarga"
         base, ext = separar_extension(sugerido)
         plantilla = paso.nombre or "{nombre}{ext}"
@@ -3253,8 +3485,275 @@ class Ejecutor:
         fallo = descarga.failure()
         if fallo:
             raise ErrorPaso("La descarga falló: %s" % fallo)
-        self.resultado.archivos.append(destino)
         self._log("    archivo guardado: %s" % destino)
+        self._archivo_nuevo(destino)
+
+    # ------------------------------------------------- v3.9: PDF abierto en una pestaña
+    def _pdf_ya_abierto(self, paso, pg, scope, fin, antes):
+        """Paso «descargar» en una pestaña que enseña un PDF (el botón grabado, p. ej. «Download», es del visor de PDF
+        del navegador y no se puede pulsar): se guarda el PDF y devuelve True.  Si la pestaña todavía está en blanco se
+        espera a que cargue.  Si esa pestaña ya descargó un PDF (navegador que no lo enseña), devuelve el índice de esa
+        descarga.  None si es una página normal."""
+        from playwright.sync_api import Error as ErrorPW
+        try:
+            indice = self.paginas.index(pg)
+        except ValueError:
+            indice = 0
+        while True:
+            self._comprobar_detener()
+            pdf = self._pdf_de_pagina(pg)
+            if pdf is not None:
+                self._guardar_pdf_abierto(paso, pg, *pdf)
+                self._cerrar_pestana_pdf(pg)
+                return True
+            if indice > 0:
+                for k, d in enumerate(self._descargas):
+                    if id(d) not in self._descargas_usadas and getattr(d, "page", None) is pg \
+                            and (d.suggested_filename or "").lower().endswith(".pdf"):
+                        self._log("    (el PDF de esta pestaña ya se descargó: se guarda ese archivo)")
+                        return k
+            try:
+                if pg.is_closed() or (pg.url or "about:blank") != "about:blank" or len(self._descargas) > antes:
+                    return None
+                for sel in paso.selectores:
+                    if self._candidatos(scope, sel, True, False)[0]:
+                        return None
+            except ErrorPW:
+                pass
+            if time.monotonic() >= fin:
+                return None
+            self._pausa(0.25)
+
+    def _pdf_tras_clic(self, paso, pg, paginas_antes, url_antes):
+        """Tras pulsar el botón de una descarga: si en vez de descargar se abrió un PDF (pedido sin pestaña, en una
+        pestaña nueva o en la misma), se guarda y devuelve True."""
+        if self._pdf_sin_pestana(paso):
+            return True
+        for q in [q for q in self.paginas[paginas_antes:] if not q.is_closed()]:
+            pdf = self._pdf_de_pagina(q)
+            if pdf is not None:
+                self._guardar_pdf_abierto(paso, q, *pdf)
+                self._cerrar_pestana_pdf(q)
+                return True
+        try:
+            cambio = not pg.is_closed() and pg.url != url_antes
+        except Exception:      # noqa: BLE001
+            cambio = False
+        if cambio:
+            pdf = self._pdf_de_pagina(pg)
+            if pdf is not None:
+                self._guardar_pdf_abierto(paso, pg, *pdf)
+                try:
+                    pg.go_back(wait_until="domcontentloaded", timeout=30000)     # vuelve a la página del botón
+                except Exception:      # noqa: BLE001
+                    self._log("    (no se pudo volver a la página anterior)")
+                return True
+        return False
+
+    def _pdf_de_pagina(self, pg):
+        """(contenido, nombre) del PDF que enseña la pestaña `pg` en el visor de PDF del navegador; None si no enseña
+        un PDF.  El contenido sale de la respuesta que lo trajo o, si el navegador no deja leerla, se vuelve a pedir
+        con la sesión del navegador (o se lee desde la página si es un blob:)."""
+        from playwright.sync_api import Error as ErrorPW
+        try:
+            if pg.is_closed():
+                return None
+            url = pg.url or ""
+            resp = self._respuestas_pdf.get(url)
+            if resp is None and (url.startswith("about:") or pg.evaluate("() => document.contentType") != "application/pdf"):
+                return None
+        except ErrorPW:
+            return None
+        datos, cabecera = None, ""
+        if resp is not None:
+            try:
+                cabecera = resp.headers.get("content-disposition") or ""
+                datos = resp.body()
+            except ErrorPW:
+                datos = None
+        if not es_pdf(datos) and url.startswith(("blob:", "data:")):
+            donde = [pg]
+            try:
+                if pg.opener() is not None:
+                    donde.append(pg.opener())
+            except ErrorPW:
+                pass
+            for q in donde:
+                try:
+                    datos = base64.b64decode(q.evaluate(JS_LEER_BLOB, url) or "")
+                except (ErrorPW, ValueError):
+                    continue
+                if es_pdf(datos):
+                    break
+        if not es_pdf(datos) and url.startswith(("http://", "https://")) and self._ctx is not None:
+            pet = resp.request if resp is not None else None
+            metodo = pet.method if pet is not None else "GET"
+            try:
+                r = self._ctx.request.fetch(url, method=metodo, timeout=120000,
+                                            data=pet.post_data_buffer if pet is not None and metodo != "GET" else None)
+                datos = r.body()
+                cabecera = r.headers.get("content-disposition") or cabecera
+            except ErrorPW as e:
+                self._log("    (no se pudo volver a pedir el PDF: %s)" % _primeras_lineas(e, 1)[:100])
+        if not es_pdf(datos):
+            raise ErrorPaso("Se abrió un PDF en una pestaña del navegador, pero no se pudo leer su contenido para guardarlo")
+        self._aprender_ruta_pdf(url)          # v3.9: la próxima vez se pide sin abrir pestaña
+        return datos, nombre_pdf(cabecera, url)
+
+    def _aprender_ruta_pdf(self, url):
+        """v3.9: apunta que esa dirección da un PDF (sin lo de después de «?») y se lo dice a las páginas abiertas: la
+        próxima vez (otra opción de «para cada opción», otro mes…) el PDF se pide sin abrir ninguna pestaña."""
+        from playwright.sync_api import Error as ErrorPW
+        if not str(url or "").startswith(("http://", "https://")):
+            return
+        ruta = str(url).split("?")[0].split("#")[0]
+        if not ruta or ruta in self._rutas_pdf:
+            return
+        self._rutas_pdf.append(ruta)
+        for pg in self.paginas:
+            try:
+                if not pg.is_closed():
+                    pg.evaluate("r => { (window.__botRutasPdf = window.__botRutasPdf || []).push(r); }", ruta)
+            except ErrorPW:
+                pass
+
+    def _pdf_sin_pestana(self, paso):
+        """v3.9: la web quiso abrir un PDF en otra pestaña y el bot lo interceptó (ver JS_PDF_SIN_PESTANA): lo pide con
+        la sesión del navegador y lo guarda, sin pestaña que se abra y se cierre.  True si guardó algo."""
+        from playwright.sync_api import Error as ErrorPW
+        while self._urls_pdf_pedidas:
+            url = self._urls_pdf_pedidas.pop(0)
+            try:
+                r = self._ctx.request.fetch(url, timeout=max(30000, self._timeout_paso(paso) * 1000))
+                datos = r.body()
+                cabecera = r.headers.get("content-disposition") or ""
+            except (ErrorPW, AttributeError) as e:
+                self._log("    (no se pudo pedir el PDF: %s)" % _primeras_lineas(e, 1)[:100])
+                continue
+            if not es_pdf(datos):
+                self._log("    (lo que abría la página no era un PDF: se abre en otra pestaña como siempre)")
+                try:                                   # no era un PDF: se abre de verdad, como habría hecho la web
+                    pg = self._ctx.new_page()
+                    pg.goto(url, wait_until="domcontentloaded", timeout=60000)
+                except ErrorPW:
+                    pass
+                return False
+            self._log("    (el PDF se pidió al servidor sin abrir otra pestaña)")
+            self._guardar_pdf_abierto(paso, None, datos, nombre_pdf(cabecera, url))
+            return True
+        return False
+
+    def _esperar_pdf_en_pestana(self, indice):
+        """v3.9: ¿el paso `indice` es un clic/descarga al que sigue una descarga DENTRO del visor de PDF del navegador
+        (el botón «Download» grabado en otra pestaña)?  Entonces, cuando la web abra el PDF, el bot lo pide él mismo."""
+        pasos = self.flujo.pasos
+        if pasos[indice].tipo not in ("clic", "descargar"):
+            return False
+        for p in pasos[indice + 1:]:
+            if p.desactivado or p.sin_valor():
+                continue
+            return p.tipo == "descargar" and p.pagina > 0 and (
+                bool(p.marco) or any(RX_BOTON_VISOR_PDF.search(s or "") for s in p.selectores))
+        return False
+
+    def _avisar_pdf_esperado(self, pg, esperado):
+        from playwright.sync_api import Error as ErrorPW
+        try:
+            pg.evaluate("v => { window.__botPdfEsperado = v; }", bool(esperado))
+        except ErrorPW:
+            pass
+
+    def _guardar_pdf_abierto(self, paso, pg, datos, sugerido):
+        """Guarda el PDF de una pestaña como una descarga normal (mismo nombre, carpeta y línea en el registro)."""
+        base, ext = separar_extension(sugerido, ".pdf")
+        plantilla = paso.nombre or "{nombre}{ext}"
+        nombre = nombre_archivo_seguro(self._r(plantilla, ext=ext, nombre=base))
+        destino = self._destino(nombre, paso.carpeta, ext if nombre.lower().endswith(ext.lower()) else None)
+        with open(destino, "wb") as f:
+            f.write(datos)
+        if pg is not None:
+            self._log("    (el PDF se abrió en una pestaña del navegador: se guarda su contenido)")
+        self._log("    archivo guardado: %s" % destino)
+        self._archivo_nuevo(destino)
+
+    def _archivo_nuevo(self, destino):
+        """v3.9: un archivo recién guardado: va a la lista de archivos, a la lista de descargas de la interfaz y, si es un
+        PDF y el reporte tiene «Imprimir los PDF que descargue», a la impresora."""
+        self.resultado.archivos.append(destino)
+        if self._lista is not None:
+            self._lista.archivo(destino)
+        self._imprimir_pdf(destino)
+
+    def _imprimir_pdf(self, ruta):
+        """«Imprimir los PDF que descargue»: manda el PDF a imprimir.  Si no se puede, lo dice en el registro, pero la
+        descarga sigue bien (nunca falla por la impresora).  Los Excel, CSV… no se imprimen."""
+        conf = mod_flujo.imprimir_pdf(self.flujo.opciones)
+        if not conf["activo"] or os.path.splitext(ruta)[1].lower() != ".pdf":
+            return
+        imprimir = self._imprimir
+        if imprimir is None:
+            from . import impresion
+            imprimir = impresion.imprimir_archivo
+        nombre = os.path.basename(ruta)
+        try:
+            usada = imprimir(ruta, conf["impresora"], log=lambda t: self._log("    " + t))
+        except Exception as e:         # noqa: BLE001 (sin impresora, sin programa, error de Windows…)
+            motivo = self._limpiar(_primeras_lineas(e, 1)) or type(e).__name__
+            self._log("    No se pudo imprimir «%s»: %s (el archivo sí se descargó)" % (nombre, motivo))
+            self.resultado.sin_imprimir.append((ruta, motivo))
+            if self._lista is not None:
+                self._lista.impreso(ruta, False)
+            return
+        destino = usada or conf["impresora"] or "la impresora predeterminada"
+        self._log("    PDF enviado a imprimir: %s → %s" % (nombre, destino))
+        self.resultado.impresiones.append({"archivo": ruta, "impresora": usada or conf["impresora"]})
+        if self._lista is not None:
+            self._lista.impreso(ruta, True)
+
+    def _crear_lista(self, periodos, por_periodos):
+        """v3.9: la lista de descargas para la interfaz si la ejecución recorre una lista («para cada opción») o se
+        repite (días, meses, quincenas)."""
+        if self._avisar_lista is None or self.hasta is not None:
+            return
+        from .lista_descargas import ListaDescargas
+        pasos = self.flujo.pasos
+        k = next((j for j, p in enumerate(pasos) if mod_flujo.es_bucle(p)), None)
+        conf = self.flujo.opciones.get("repetir_dias")
+        repite = isinstance(conf, dict) and (conf.get("modo") or "no") not in ("no", "") or self.dias is not None
+        if k is None and not (repite and periodos):
+            return
+        if k is not None:
+            fin = mod_flujo.fin_del_bucle(pasos, k)
+            tramo = pasos[k + 1:fin]
+            lista = (pasos[k].filtro or pasos[k].objetivo or "").strip() or "la lista"
+            opciones = mod_flujo.opciones_del_bucle(pasos[k]) if pasos[k].estrategia == "marcadas" else None
+        else:
+            tramo, lista, opciones = pasos, None, None
+        guardan = sum(1 for p in tramo if p.tipo in mod_flujo.TIPOS_QUE_GUARDAN and not p.desactivado)
+        textos = []
+        if repite:
+            textos = [mod_flujo.describir_periodo(*x) if por_periodos else x[0].strftime("%d/%m/%Y") for x in periodos]
+        self._k_lista = k
+        self._lista = ListaDescargas(self.flujo.nombre, self._avisar_lista, periodos=textos,
+                                     modo_periodo=conf.get("modo") if por_periodos else "dias", lista=lista,
+                                     opciones=opciones, por_pase=guardan)
+
+    def _cerrar_pestana_pdf(self, pg):
+        """Cierra la pestaña del PDF si es una pestaña nueva y ningún paso siguiente la usa (los pasos siguientes
+        siguen en la pestaña de antes)."""
+        try:
+            indice = self.paginas.index(pg)
+        except ValueError:
+            return
+        if indice == 0 or any(p.pagina == indice and not p.desactivado
+                              for p in self.flujo.pasos[self._indice_actual + 1:]):
+            return
+        try:
+            pg.close()
+            self._pestanas_pdf_cerradas.add(indice)
+            self._log("    (se cierra la pestaña del PDF)")
+        except Exception:      # noqa: BLE001
+            pass
 
     def _guardar_pagina(self, paso, pg, timeout):
         """Guarda la página actual como PDF, HTML o CSV (la tabla más grande)."""
@@ -3287,8 +3786,8 @@ class Ejecutor:
             contenido = inyectar_base(pg.content(), pg.url)
             with open(destino, "w", encoding="utf-8") as f:
                 f.write(contenido)
-        self.resultado.archivos.append(destino)
         self._log("    página guardada: %s" % destino)
+        self._archivo_nuevo(destino)
 
     def _esperar_tabla(self, pg, fin):
         from playwright.sync_api import Error as ErrorPW
@@ -3399,6 +3898,8 @@ class Ejecutor:
             res.error = self._limpiar("%s: %s" % (type(e).__name__, _primeras_lineas(e)))
             self._log("ERROR inesperado: %s" % res.error)
         finally:
+            if self._lista is not None:
+                self._lista.cerrar(detenido=res.detenido, error=res.error)
             self._log("Resultado: %s" % res.resumen())
             self._archivo_log.close()
             self._archivo_log = None
@@ -3424,7 +3925,13 @@ class Ejecutor:
                     ctx.add_init_script(JS_INIT_CARGA)     # cuenta los cambios del DOM (indicadores atascados)
                 except ErrorPW:
                     pass
+                try:                                       # v3.9: PDF en otra pestaña (ver JS_PDF_SIN_PESTANA)
+                    ctx.expose_binding("__botPdfAbierto", lambda origen, url: self._urls_pdf_pedidas.append(url))
+                    ctx.add_init_script(JS_PDF_SIN_PESTANA)
+                except Exception:      # noqa: BLE001 (sin esto solo se abre la pestaña, como antes)
+                    pass
                 ctx.on("page", self._registrar_pagina)
+                ctx.on("response", self._anotar_pdf)       # v3.9 (en el contexto: también la 1.ª de una pestaña nueva)
                 for pg in ctx.pages:
                     self._registrar_pagina(pg)
                 if not self.paginas:
@@ -3438,7 +3945,9 @@ class Ejecutor:
                 res.periodos = list(periodos) if por_periodos else []
                 if por_periodos and len(periodos) > 1:
                     self._nombres_por_periodo()
+                self._crear_lista(periodos, por_periodos)
                 for n, periodo in enumerate(periodos or [None], 1):
+                    self._pase = n - 1
                     self.periodo = periodo
                     self.fecha = periodo[0] if periodo else None
                     if periodo is not None:
@@ -3452,7 +3961,13 @@ class Ejecutor:
                         self.progreso(-1, "dia", texto)
                         self._indice_previo = self._recuperado_en = self._guardia_en = None
                         self._tras_abrir = False
-                    if not self._recorrer(res, pausa):
+                    sin_bucle = self._lista is not None and self._k_lista is None
+                    if sin_bucle:
+                        self._lista.empezar(self._pase)
+                    bien = self._recorrer(res, pausa)
+                    if sin_bucle:
+                        self._lista.terminar(bien, res.error)
+                    if not bien:
                         return
                 if self.al_final is not None:
                     pg = self._pagina_si_existe(self._pagina_activa if self._pagina_activa >= 0 else 0) or \
@@ -3500,6 +4015,12 @@ class Ejecutor:
                 self._log("    desactivado: se omite")
                 self.progreso(i - 1, "desactivado", "desactivado")
                 continue
+            if self._clic_de_calendario_sobrante(i - 1):     # v3.9
+                res.desactivados += 1
+                self._log("Paso %d/%d: %s" % (i, res.total, descripcion))
+                self._log("    clic dentro del calendario: se omite (la fecha la escribe directamente un paso siguiente)")
+                self.progreso(i - 1, "omitido", "clic del calendario: la fecha la escribe otro paso")
+                continue
             if paso.sin_valor():            # v3.8: se dejó vacío: no se toca la página (ni se falla)
                 res.sin_valor += 1
                 self._log("Paso %d/%d: %s" % (i, res.total, descripcion))
@@ -3515,13 +4036,20 @@ class Ejecutor:
             self._pista_login = ""
             try:
                 self._proteger_literal(paso)
+                espera_pdf = self._esperar_pdf_en_pestana(i - 1)     # v3.9: el PDF del visor, sin pestaña nueva
                 carga = self._carga_activa(paso)
                 pg_paso = self._pagina_si_existe(paso.pagina)
                 if carga and pg_paso is not None and paso.tipo not in ("abrir_url", "esperar_segundos"):
                     self._esperar_carga(pg_paso, minimo=0, paso=paso)     # antes de buscar el elemento
                 if carga and paso.tipo not in TIPOS_ESPERA:
                     self._preparar_accion(i - 1)
-                self._ejecutar_paso(paso)
+                if espera_pdf and pg_paso is not None:
+                    self._avisar_pdf_esperado(pg_paso, True)
+                try:
+                    self._ejecutar_paso(paso)
+                finally:
+                    if espera_pdf and pg_paso is not None:
+                        self._avisar_pdf_esperado(pg_paso, False)
                 if carga and paso.tipo in mod_flujo.TIPOS_CON_CARGA:
                     # tras un clic, tecla, lista… se observa un momento por si la petición tarda en
                     # empezar; tras escribir o esperar basta con mirar cómo está la página
@@ -3551,6 +4079,44 @@ class Ejecutor:
             self.progreso(i - 1, "ok", "")
         return True
 
+    def _clic_en_visor_pdf(self, pg, paso):
+        """v3.9: un clic grabado en los botones del visor de PDF del navegador («Imprimir», «Guardar», «Download») no se
+        puede pulsar: esos botones son del navegador, no de la página.  Si el reporte ya tiene «Imprimir los PDF que
+        descargue», el paso se salta (el PDF ya va a la impresora al guardarlo); si no, el paso falla diciendo qué
+        hacer.  True = saltar el paso."""
+        from playwright.sync_api import Error as ErrorPW
+        if not any(RX_BOTON_VISOR_PDF.search(s or "") for s in paso.selectores):
+            return False
+        try:
+            if pg.is_closed() or pg.evaluate("() => document.contentType") != "application/pdf":
+                return False
+        except ErrorPW:
+            return False
+        if mod_flujo.imprimir_pdf(self.flujo.opciones)["activo"]:
+            self._log("    (este botón es del visor de PDF del navegador y no se puede pulsar; no hace falta: el PDF se "
+                      "manda a la impresora al guardarlo)")
+            return True
+        raise ErrorPaso("Este paso pulsa un botón del visor de PDF del navegador (la impresora o el disquete de arriba), "
+                        "que no es de la página web: el bot no puede pulsarlo. Para imprimir lo que baja el reporte, "
+                        "marca «Imprimir los PDF que descargue» en el reporte y borra este paso.")
+
+    def _clic_de_calendario_sobrante(self, indice):
+        """v3.9: un clic grabado DENTRO de un calendario (un día, «‹», «›»…) al que sigue (tras otros clics del mismo
+        calendario) un paso que escribe la fecha directamente sobra: el día y el mes grabados no son los de hoy, así que
+        cambiaría la fecha o se quedaría esperando a un calendario cerrado.  Se omite."""
+        pasos = self.flujo.pasos
+
+        def de_calendario(p):
+            return p.tipo == "clic" and any(RX_SELECTOR_CALENDARIO.search(s or "") for s in p.selectores) \
+                and bool(RX_OBJETIVO_CALENDARIO.fullmatch((p.objetivo or "").strip()))
+        if not de_calendario(pasos[indice]):
+            return False
+        for p in pasos[indice + 1:]:
+            if p.desactivado or de_calendario(p):
+                continue
+            return p.tipo == "escribir" and (bool(p.fecha_directa) or leer_fecha(p.valor)[0] is not None)
+        return False
+
     def _proteger_literal(self, paso):
         """Si un campo de contraseña lleva el texto en claro, ese texto no debe salir en ningún registro."""
         if paso.valor_literal_en_campo_contrasena():
@@ -3566,6 +4132,15 @@ class Ejecutor:
         pg.on("download", lambda d: self._descargas.append(d))
         pg.on("dialog", lambda dlg: self._aceptar_dialogo(dlg))
         self._seguir_red(pg)
+
+    def _anotar_pdf(self, resp):
+        """v3.9: apunta las respuestas que abren un PDF en una pestaña (el visor de PDF del navegador)."""
+        try:
+            if resp.request.resource_type == "document" and resp.url.startswith(("http://", "https://")) \
+                    and "application/pdf" in (resp.headers.get("content-type") or "").lower():
+                self._respuestas_pdf[resp.url] = resp
+        except Exception:      # noqa: BLE001 (la página se cerró)
+            pass
 
     def _aceptar_dialogo(self, dlg):
         try:
@@ -3601,12 +4176,15 @@ class Ejecutor:
         original = self.flujo.pasos[k]
         que = original.nombre_objetivo() or "la lista"
         primera = None
+        lista = self._lista if self._lista is not None and k == self._k_lista else None
         if original.estrategia == "cada_una":
             # primera vuelta: el paso tal cual (elige la primera opción de verdad) y así se lee la lista entera
             res.opciones_leidas.pop(k, None)
             ok = self._recorrer_pasos(res, pausa, k, k + 1)
             leidas = (res.opciones_leidas.get(k) or {}).get("opciones")
             if leidas is None:
+                if lista is not None:
+                    lista.fallo_pase(self._pase, res.error or "No se pudo leer la lista")
                 return False
             objetivos = mod_flujo.opciones_del_bucle(original, leidas)
             if ok:
@@ -3622,8 +4200,12 @@ class Ejecutor:
                 res.error = "La lista %s no tiene opciones que recorrer" % que
                 self._log("    ERROR: %s" % res.error)
                 self.progreso(k, "error", res.error)
+            if lista is not None:
+                lista.fallo_pase(self._pase, res.error)
             return False
         total = len(objetivos)
+        if lista is not None:
+            lista.opciones_leidas(self._pase, objetivos)
         self._log("    Para cada opción de %s: %s: %s" % (
             que, "1 opción" if total == 1 else "%d opciones" % total,
             ", ".join("«%s»" % self._limpiar(t[:40]) for t in objetivos[:10]) + (" …" if total > 10 else "")))
@@ -3633,6 +4215,8 @@ class Ejecutor:
             aviso = "Opción «%s» de %s (%d de %d)" % (self._limpiar(texto[:60]), que, n, total)
             self._log("=== %s ===" % aviso)
             self.progreso(-1, "dia", aviso)
+            if lista is not None:
+                lista.empezar(self._pase, texto)
             if n == 1 and primera == texto:
                 ok = True                                   # ya se eligió en la primera vuelta
             else:
@@ -3642,9 +4226,13 @@ class Ejecutor:
                 ok = self._con_sufijo(k, cuerpo, texto, lambda: self._recorrer_con_opciones(res, pausa, k + 1, cuerpo))
             if ok:
                 bien.append(texto)
+                if lista is not None:
+                    lista.terminar(True)
                 continue
             motivo = "paso %s: %s" % (res.paso_fallido, res.error or "error")
             fallos.append((texto, motivo))
+            if lista is not None:
+                lista.terminar(False, self._limpiar(motivo))
             self._log("    La opción «%s» falló (%s). Se sigue con la siguiente." % (self._limpiar(texto[:60]), motivo))
             res.paso_fallido, res.error = None, ""
             self._indice_previo = self._recuperado_en = self._guardia_en = None
@@ -3749,8 +4337,11 @@ class Ejecutor:
                 raise ErrorPaso("Todavía no se ha descargado ningún archivo que imprimir: pon el paso «Imprimir» después "
                                 "del paso «Descargar»")
             ruta = self.resultado.archivos[-1]
+            if any(i["archivo"] == ruta for i in self.resultado.impresiones):
+                self._log("    (ya se mandó a imprimir con «Imprimir los PDF que descargue»: no se imprime dos veces)")
+                return
         try:
-            usada = impresion.imprimir_archivo(ruta, impresora, log=lambda t: self._log("    " + t))
+            usada = (self._imprimir or impresion.imprimir_archivo)(ruta, impresora, log=lambda t: self._log("    " + t))
         except impresion.ErrorImpresion as e:
             raise ErrorPaso(str(e)) from None
         self.resultado.impresiones.append({"archivo": ruta, "impresora": usada})

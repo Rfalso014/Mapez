@@ -139,6 +139,25 @@ def _coincide_gmail(m, q):
     return True
 
 
+def pdf_simple(lineas):
+    """v3.9: un PDF mínimo (una página, texto sin comprimir: las pruebas buscan las fechas en sus bytes)."""
+    texto = " ".join("(%s) Tj 0 -16 Td" % re.sub(r"[\\()]", "", str(t)) for t in lineas)
+    contenido = "BT /F1 12 Tf 50 750 Td %s ET" % texto
+    objetos = ["<< /Type /Catalog /Pages 2 0 R >>", "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+               "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R "
+               "/Resources << /Font << /F1 5 0 R >> >> >>",
+               "<< /Length %d >>\nstream\n%s\nendstream" % (len(contenido), contenido),
+               "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"]
+    salida, posiciones = "%PDF-1.4\n", []
+    for n, o in enumerate(objetos, 1):
+        posiciones.append(len(salida))
+        salida += "%d 0 obj\n%s\nendobj\n" % (n, o)
+    xref = len(salida)
+    salida += "xref\n0 %d\n0000000000 65535 f \n" % (len(objetos) + 1) + "".join("%010d 00000 n \n" % x for x in posiciones)
+    salida += "trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n" % (len(objetos) + 1, xref)
+    return salida.encode("latin-1")
+
+
 def _resumen_correo(m):
     return {"id": m["id"], "de_nombre": m["de_nombre"], "de_correo": m["de_correo"], "asunto": m["asunto"],
             "fecha_outlook": fecha_outlook(m["fecha"]), "fecha_gmail": fecha_gmail(m["fecha"]),
@@ -238,6 +257,20 @@ class _Silencioso(http.server.SimpleHTTPRequestHandler):
             cuerpo = ("almacen;fecha\n%s;%s\n" % (almacen, fecha)).encode("utf-8")
             return self._json(None, {"Content-Disposition": 'attachment; filename="existencias.csv"'}, cuerpo=cuerpo,
                               tipo="application/octet-stream")
+        if u.path in ("/api/pagos/pdf", "/api/pagos/excel"):    # v3.9: portal de Pagos (el PDF se abre en una pestaña)
+            q = parse_qs(u.query)
+            desde, hasta = q.get("DateFrom", [""])[0], q.get("DateTo", [""])[0]
+            comercio = q.get("LocationId", [""])[0]
+            if u.path.endswith("pdf"):
+                self.server.estado["descargas"].append("Pagos PDF %s %s %s" % (comercio, desde, hasta))
+                return self._json(None, {"Content-Disposition": "filename=ReportePagos.pdf;"},
+                                  cuerpo=pdf_simple(["Reporte de pagos", "Comercio %s" % comercio, "Desde %s" % desde,
+                                                     "Hasta %s" % hasta]),
+                                  tipo="application/pdf")
+            self.server.estado["descargas"].append("Pagos Excel %s %s %s" % (comercio, desde, hasta))
+            return self._json(None, {"Content-Disposition": 'attachment; filename="ReportePagos.xls"'},
+                              cuerpo=("Desde;Hasta;Comercio\n%s;%s;%s\n" % (desde, hasta, comercio)).encode("utf-8"),
+                              tipo="application/vnd.ms-excel")
         if u.path.startswith("/api/"):
             ms = 0
             if u.path == "/api/lento":

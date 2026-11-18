@@ -246,6 +246,8 @@ class Paso:
             return False
         if self.tipo == "escribir":
             return True
+        if self.tipo == "elegir_opcion" and (self.estrategia or "") == "marcadas":
+            return not self.valores          # v3.9: «las que marque» sin ninguna marcada: no se toca la página
         return self.tipo == "elegir_opcion" and (self.estrategia or "fija") in ("fija", "contiene", "por_fecha")
 
     # --- tiempos ----------------------------------------------------------
@@ -1204,6 +1206,18 @@ def opciones_del_bucle(paso, leidas=None):
     return list(dict.fromkeys(_normal(t) for t in base if _normal(t)))
 
 
+def listas_para_todas(flujo):
+    """v3.9 «Descargar todas»: las listas del reporte que se pueden recorrer (una descarga por opción), en el orden del
+    reporte: [{paso, nombre, estrategia, ya}] («ya» = el paso ya está puesto en «todas» o «las que marque»)."""
+    res = []
+    for i, p in enumerate(flujo.pasos):
+        if p.tipo != "elegir_opcion" or p.desactivado:
+            continue
+        res.append({"paso": i, "nombre": p.filtro or p.objetivo or "la lista", "estrategia": p.estrategia or "fija",
+                    "ya": (p.estrategia or "") in ESTRATEGIAS_BUCLE})
+    return res
+
+
 _RX_SEL_OPCION = re.compile(r"role=option|\[role=\"?option|v-list-item|\boption\b|listbox|role=menuitem|"
                             r"select2-results|mat-option|dropdown-item|ui-menu-item|\.v-overlay|#v-menu", re.IGNORECASE)
 
@@ -1583,6 +1597,17 @@ def reportes_siguientes(flujo, ok=True):
     if not conf or (conf["cuando"] == "bien" and not ok):
         return []
     return list(conf["reportes"])
+
+
+# --- v3.9: «Imprimir los PDF que descargue» ---------------------------------------------------------------------------
+# opciones["imprimir_pdf"] = {"activo": bool, "impresora": ""} (impresora vacía = la predeterminada de Windows).  Cada
+# PDF que guarde la ejecución se manda a imprimir nada más guardarse (los Excel y CSV, nunca).
+def imprimir_pdf(opciones):
+    """«Imprimir los PDF que descargue» de unas opciones, en su forma canónica: {"activo", "impresora"}."""
+    conf = (opciones or {}).get("imprimir_pdf")
+    if not isinstance(conf, dict):
+        conf = {"activo": conf is True}
+    return {"activo": conf.get("activo") is True, "impresora": str(conf.get("impresora") or "").strip()[:200]}
 
 
 # ============================================================================ v3.5: nombre de las descargas

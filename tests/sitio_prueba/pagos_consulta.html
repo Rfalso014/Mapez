@@ -1,0 +1,312 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Pagos - Comprobantes (prueba v3.9)</title>
+<style>
+  body { font-family: Segoe UI, Arial, sans-serif; margin: 30px; }
+  .datepicker { position: absolute; background: #fff; border: 1px solid #bbb; padding: 4px; z-index: 10; }
+  .datepicker td, .datepicker th { width: 26px; height: 22px; text-align: center; cursor: pointer; }
+  .datepicker td.old, .datepicker td.new { color: #999; }
+  .datepicker td.active { background: #1565c0; color: #fff; }
+  .datepicker td.disabled { color: #ddd; cursor: default; }
+  .MainBox { display: inline-block; min-width: 280px; padding: 4px 8px; border: 1px solid #bbb; cursor: pointer; position: relative; }
+  .MainBox::before { content: "\1F4CD  "; }
+  .LocationSelect.datepicker { left: 0; top: 100%; max-height: 120px; overflow-y: auto; min-width: 300px; }
+  .LoginAssignmentList { list-style: none; margin: 0; padding: 0; }
+  .LoginAssignmentList li { padding: 3px 6px; }
+  .LoginAssignmentList li.unit { font-weight: bold; background: #e5e5e5; }
+  .LoginAssignmentList li.location { cursor: pointer; }
+  .LoginAssignmentList li.location input { display: none; }
+  .merchantid { float: right; margin-left: 12px; background: #eef; padding: 0 4px; border-radius: 3px; }
+  .navbar { background: #f0f0f0; padding: 6px; margin-bottom: 10px; }
+  .navbar ul { list-style: none; display: flex; gap: 14px; margin: 0; padding: 0; }
+  .btn-group label { border: 1px solid #bbb; padding: 2px 10px; cursor: pointer; }
+  .btn-group label.activo { background: #1565c0; color: #fff; }
+  .btn-group input { display: none; }
+</style>
+</head>
+<body>
+<!--
+  v3.9: portal de Pagos («Consultas › Comprobantes»).  Imita lo que hacía mal el bot en el portal real:
+  - Los campos «DateFrom» / «DateTo» llevan un calendario tipo bootstrap-datepicker 1.3 (la página también tiene cargado
+    jQuery UI, pero estos campos no son suyos).  El calendario guarda la fecha por su cuenta: solo lee lo escrito con el
+    teclado (keyup).  Si el texto se pone de golpe (como hace `fill`), al cerrarse el calendario con el siguiente clic
+    fuera (forceParse) vuelve a escribir en el campo SU fecha: la consulta sale con las fechas de antes.
+  - No deja elegir fechas futuras (endDate = hoy).
+  - «Comercio»: lista propia (no un <select>) con un icono: al pulsarla se abre una lista que se desplaza con un buscador,
+    una cabecera de grupo (el nombre de la empresa, en negrita y sombreada: NO es un comercio) y los comercios, cada uno
+    con su nombre y su número en una etiqueta aparte («TIENDA CENTRO 10000000001»).  El elegido va en LocationId.
+  - «PDF» abre el PDF en una pestaña nueva (visor de PDF del navegador: su botón «Download» no es de la página).
+    «PDF (blob)» hace lo mismo con un PDF creado en la página (blob:).  «Excel» descarga un archivo.
+  Nombres inventados.
+-->
+  <!-- Dos cosas que NO son listas para elegir y que el mapeo NO debe traer: la barra de la web y un grupo de botones
+       (sus radios están ocultos, como en la lista de comercios, pero el grupo se ve y no es un desplegable). -->
+  <nav class="navbar">
+    <ul>
+      <li><a href="pagos_consulta.html">Inicio</a></li>
+      <li><a href="pagos_consulta.html">Movimientos</a></li>
+      <li><a href="pagos_consulta.html">Ayuda</a></li>
+    </ul>
+  </nav>
+  <h1>Pagos</h1>
+  <h2>Comprobantes</h2>
+  <form id="filtros" action="pagos_consulta.html" method="get" onsubmit="return false">
+    <table>
+      <tr>
+        <td><label>Comercio:</label></td>
+        <td colspan="5">
+          <input type="text" id="LocationId" name="LocationId" value="501" style="display: none;">
+          <div id="LocationIdlabel" class="LocationSelect MainBox">
+            <span id="LocationIdspan">TIENDA CENTRO 10000000001</span>
+            <div id="LocationIddropdown" class="LocationSelect datepicker datepicker-dropdown dropdown-menu" style="display:none;">
+              <ul class="LoginAssignmentList">
+                <li class="search"><label>Buscar: <input id="LocationSearchFilterText" name="LocationSearchFilterText" type="text" value=""></label></li>
+                <li class="search-empty" style="display:none;"><label>No hay comercios que coincidan con la búsqueda</label></li>
+                <li class="unit">EMPRESA DE EJEMPLO SRL</li>
+                <li class="location"><label><input id="LocationId" name="LocationId" type="radio" value="501">TIENDA CENTRO <span class="merchantid">10000000001</span></label></li>
+                <li class="location"><label><input id="LocationId" name="LocationId" type="radio" value="502">TIENDA NORTE <span class="merchantid">10000000002</span></label></li>
+                <li class="location"><label><input id="LocationId" name="LocationId" type="radio" value="503">TIENDA SUR II <span class="merchantid">10000000003</span></label></li>
+                <li class="location"><label><input id="LocationId" name="LocationId" type="radio" value="504">TIENDA PLAYA <span class="merchantid">10000000004</span></label></li>
+                <li class="location"><label><input id="LocationId" name="LocationId" type="radio" value="505">TIENDA AEROPUERTO <span class="merchantid">10000000005</span></label></li>
+              </ul>
+            </div>
+          </div>
+        </td>
+      </tr>
+      <tr>
+        <td><label for="DateFrom">Desde</label></td><td><input type="text" id="DateFrom" name="DateFrom"></td>
+        <td><label for="DateTo">Hasta</label></td><td><input type="text" id="DateTo" name="DateTo"></td>
+        <td><label for="FechaPago">Fecha de pago</label></td><td><input type="date" id="FechaPago" name="FechaPago"></td>
+      </tr>
+    </table>
+    <p>
+      <input type="button" value="Consultar" id="SearchButton" class="blue">
+      <input type="button" value="PDF" id="PDFButton" class="blue download">
+      <input type="button" value="PDF (blob)" id="PDFBlobButton" class="blue download">
+      <input type="button" value="Excel" id="ExcelButton" class="blue download">
+      <input type="button" value="Ver en otra pestaña" id="OtraButton" class="blue">
+    </p>
+  </form>
+  <p>
+    <span class="btn-group" id="grupoVista" role="group">
+      <label class="activo"><input type="radio" name="Vista" value="resumen" checked> Resumen</label>
+      <label><input type="radio" name="Vista" value="detalle"> Detalle</label>
+      <label><input type="radio" name="Vista" value="grafico"> Gráfico</label>
+    </span>
+  </p>
+  <p id="resultado"></p>
+<script>
+// --------------------------------------------------------------- jQuery mínimo (solo $(el).data)
+(function () {
+  const datos = new WeakMap();
+  function $(el) {
+    return {
+      data(k, v) {
+        let d = datos.get(el);
+        if (!d) { d = {}; datos.set(el, d); }
+        if (v === undefined) return k === undefined ? d : d[k];
+        d[k] = v;
+        return this;
+      }
+    };
+  }
+  $.fn = { jquery: '3.5.1 (prueba)' };
+  // Como en el portal: jQuery UI también está cargado (su $.datepicker), pero no maneja estos campos.
+  $.datepicker = { parseDate() { throw new Error('jQuery UI no maneja estos campos'); }, formatDate() { return ''; } };
+  window.jQuery = window.$ = $;
+})();
+
+// --------------------------------------------------------------- calendario tipo bootstrap-datepicker 1.3
+(function () {
+  const MESES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October',
+                 'November', 'December'];
+  const dos = (n) => String(n).padStart(2, '0');
+  const utc = (a, m, d) => new Date(Date.UTC(a, m, d));
+  const aUtc = (l) => utc(l.getFullYear(), l.getMonth(), l.getDate());
+  const aLocal = (u) => new Date(u.getUTCFullYear(), u.getUTCMonth(), u.getUTCDate());
+  const formatear = (u) => dos(u.getUTCDate()) + '/' + dos(u.getUTCMonth() + 1) + '/' + u.getUTCFullYear();
+  function leer(t) {
+    const m = /^\s*(\d{1,2})\/(\d{1,2})\/(\d{4})\s*$/.exec(t || '');
+    if (!m) return null;
+    const d = utc(+m[3], +m[2] - 1, +m[1]);
+    return d.getUTCMonth() === +m[2] - 1 ? d : null;
+  }
+
+  function Datepicker(el, o) {
+    this.element = el;
+    this.o = Object.assign({ format: 'dd/mm/yyyy', forceParse: true, language: 'en', autoclose: true,
+                             startDate: utc(1900, 0, 1), endDate: utc(9999, 11, 31) }, o || {});
+    this.dates = [];
+    this.viewDate = aUtc(new Date());
+    this.picker = document.createElement('div');
+    this.picker.className = 'datepicker datepicker-dropdown dropdown-menu';
+    this.picker.innerHTML = '<div class="datepicker-days"><table class="table-condensed"><thead><tr>' +
+      '<th class="prev">«</th><th colspan="5" class="datepicker-switch"></th><th class="next">»</th></tr><tr>' +
+      ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'].map((d) => '<th class="dow">' + d + '</th>').join('') +
+      '</tr></thead><tbody></tbody></table></div>';
+    this._fuera = (e) => { if (!(e.target === this.element || this.picker.contains(e.target))) this.hide(); };
+    el.addEventListener('focus', () => this.show());
+    el.addEventListener('keyup', (e) => { if ([27, 37, 39, 38, 40, 32, 13, 9].indexOf(e.keyCode) === -1) this.update(); });
+    el.addEventListener('keydown', (e) => { if (e.keyCode === 27 || e.keyCode === 9) this.hide(); });
+    this.picker.addEventListener('click', (e) => this.click(e));
+    this.update();
+  }
+  Datepicker.prototype = {
+    _trigger(nombre) { this.element.dispatchEvent(new CustomEvent(nombre, { bubbles: true })); },
+    update(...args) {
+      const antes = String(this.dates);
+      let fechas;
+      if (args.length) fechas = args.map((d) => (d instanceof Date ? aUtc(d) : leer(d)));
+      else fechas = [leer(this.element.value)];
+      this.dates = fechas.filter((d) => d && d >= this.o.startDate && d <= this.o.endDate);
+      if (this.dates.length) this.viewDate = new Date(this.dates[this.dates.length - 1]);
+      if (args.length) this.setValue();
+      else if (fechas.length && antes !== String(this.dates)) this._trigger('changeDate');
+      this.fill();
+    },
+    getUTCDate() { return new Date(this.dates[this.dates.length - 1]); },
+    getDate() { return aLocal(this.getUTCDate()); },
+    setDates(...args) { this.update(...args); this._trigger('changeDate'); this.setValue(); },
+    setDate(...args) { return this.setDates(...args); },
+    setValue() {
+      this.element.value = this.getFormattedDate();
+      this.element.dispatchEvent(new Event('change', { bubbles: true }));
+    },
+    getFormattedDate() { return this.dates.map(formatear).join(','); },
+    show() {
+      if (this.picker.parentNode) return;
+      const r = this.element.getBoundingClientRect();
+      this.picker.style.left = (r.left + window.scrollX) + 'px';
+      this.picker.style.top = (r.bottom + window.scrollY + 2) + 'px';
+      document.body.appendChild(this.picker);
+      document.addEventListener('mousedown', this._fuera);
+      this.fill();
+    },
+    hide() {
+      if (!this.picker.parentNode) return;
+      this.picker.remove();
+      document.removeEventListener('mousedown', this._fuera);
+      if (this.o.forceParse && this.element.value) this.setValue();     // ¡vuelve a poner SU fecha!
+      this._trigger('hide');
+    },
+    fill() {
+      const a = this.viewDate.getUTCFullYear(), m = this.viewDate.getUTCMonth();
+      this.picker.querySelector('.datepicker-switch').textContent = MESES[m] + ' ' + a;
+      const primero = utc(a, m, 1);
+      let d = utc(a, m, 1 - primero.getUTCDay());
+      const elegida = this.dates.length ? this.dates[this.dates.length - 1].getTime() : null;
+      let html = '';
+      for (let fila = 0; fila < 6; fila++) {
+        html += '<tr>';
+        for (let c = 0; c < 7; c++) {
+          let cls = 'day';
+          if (d.getUTCMonth() !== m) cls += (d < primero ? ' old' : ' new');
+          if (d.getTime() === elegida) cls += ' active';
+          if (d < this.o.startDate || d > this.o.endDate) cls += ' disabled';
+          html += '<td class="' + cls + '" data-t="' + d.getTime() + '">' + d.getUTCDate() + '</td>';
+          d = utc(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() + 1);
+        }
+        html += '</tr>';
+      }
+      this.picker.querySelector('tbody').innerHTML = html;
+    },
+    click(e) {
+      const t = e.target;
+      if (t.classList.contains('prev') || t.classList.contains('next')) {
+        const paso = t.classList.contains('prev') ? -1 : 1;
+        this.viewDate = utc(this.viewDate.getUTCFullYear(), this.viewDate.getUTCMonth() + paso, 1);
+        this.fill();
+      } else if (t.classList.contains('day') && !t.classList.contains('disabled')) {
+        this.dates = [new Date(+t.dataset.t)];
+        this.viewDate = new Date(this.dates[0]);
+        this.setValue();
+        this._trigger('changeDate');
+        if (this.o.autoclose) this.hide(); else this.fill();
+      }
+    }
+  };
+
+  const hoy = aUtc(new Date());
+  const desde = document.getElementById('DateFrom'), hasta = document.getElementById('DateTo');
+  desde.value = formatear(utc(hoy.getUTCFullYear(), hoy.getUTCMonth(), hoy.getUTCDate() - 7));
+  hasta.value = formatear(hoy);
+  for (const campo of [desde, hasta]) window.jQuery(campo).data('datepicker', new Datepicker(campo, { endDate: hoy }));
+})();
+
+// --------------------------------------------------------------- lista de comercios (propia)
+(function () {
+  const caja = document.getElementById('LocationIdlabel'), lista = document.getElementById('LocationIddropdown');
+  const oculto = document.querySelector('input[type=text][name=LocationId]'), texto = document.getElementById('LocationIdspan');
+  const abrir = (si) => { lista.style.display = si ? 'block' : 'none'; };
+  caja.addEventListener('click', (e) => { if (!lista.contains(e.target)) abrir(lista.style.display === 'none'); });
+  document.addEventListener('click', (e) => { if (!caja.contains(e.target)) abrir(false); });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') abrir(false); });
+  lista.querySelectorAll('li.location').forEach((li) => li.addEventListener('click', (e) => {
+    e.preventDefault();
+    const r = li.querySelector('input');
+    r.checked = true;
+    oculto.value = r.value;
+    texto.textContent = li.textContent.replace(/\s+/g, ' ').trim();
+    abrir(false);
+  }));
+  const buscar = document.getElementById('LocationSearchFilterText');
+  buscar.addEventListener('input', () => {
+    const q = buscar.value.trim().toLowerCase();
+    let hay = 0;
+    lista.querySelectorAll('li.location').forEach((li) => {
+      const si = !q || li.textContent.toLowerCase().includes(q);
+      li.style.display = si ? '' : 'none';
+      hay += si ? 1 : 0;
+    });
+    lista.querySelector('li.search-empty').style.display = hay ? 'none' : '';
+  });
+})();
+
+// --------------------------------------------------------------- botones
+(function () {
+  const v = (id) => document.getElementById(id).value;
+  const comercio = () => document.querySelector('input[type=text][name=LocationId]').value;
+  const consulta = () => new URLSearchParams({ LocationId: comercio(), DateFrom: v('DateFrom'), DateTo: v('DateTo') }).toString();
+  document.getElementById('SearchButton').addEventListener('click', () => {
+    document.getElementById('resultado').textContent = 'Consulta del ' + v('DateFrom') + ' al ' + v('DateTo') +
+      ' (comercio ' + comercio() + ')' +
+      (v('FechaPago') ? ' pagado el ' + v('FechaPago') : '');
+  });
+  document.getElementById('PDFButton').addEventListener('click', () => {
+    window.open('/api/pagos/pdf?' + consulta(), '_blank');
+  });
+  document.getElementById('ExcelButton').addEventListener('click', () => {
+    location.href = '/api/pagos/excel?' + consulta();
+  });
+  // PDF creado en la página (blob:), como hacen algunos portales
+  function pdfSimple(lineas) {
+    const texto = lineas.map((t) => '(' + String(t).replace(/[\\()]/g, '') + ') Tj 0 -16 Td').join(' ');
+    const contenido = 'BT /F1 12 Tf 50 750 Td ' + texto + ' ET';
+    const objetos = ['<< /Type /Catalog /Pages 2 0 R >>', '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+      '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>',
+      '<< /Length ' + contenido.length + ' >>\nstream\n' + contenido + '\nendstream',
+      '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>'];
+    let salida = '%PDF-1.4\n';
+    const pos = [];
+    objetos.forEach((o, i) => { pos.push(salida.length); salida += (i + 1) + ' 0 obj\n' + o + '\nendobj\n'; });
+    const xref = salida.length;
+    salida += 'xref\n0 ' + (objetos.length + 1) + '\n0000000000 65535 f \n' +
+      pos.map((p) => String(p).padStart(10, '0') + ' 00000 n \n').join('');
+    salida += 'trailer\n<< /Size ' + (objetos.length + 1) + ' /Root 1 0 R >>\nstartxref\n' + xref + '\n%%EOF\n';
+    return salida;
+  }
+  // abre una PÁGINA normal (no un PDF) en otra pestaña: el bot debe dejarla abrirse como siempre
+  document.getElementById('OtraButton').addEventListener('click', () => {
+    window.open('pagos_consulta.html?otra=1', '_blank');
+  });
+  document.getElementById('PDFBlobButton').addEventListener('click', () => {
+    const blob = new Blob([pdfSimple(['Reporte de pagos (blob)', 'Desde ' + v('DateFrom'), 'Hasta ' + v('DateTo')])],
+                          { type: 'application/pdf' });
+    window.open(URL.createObjectURL(blob), '_blank');
+  });
+})();
+</script>
+</body>
+</html>
