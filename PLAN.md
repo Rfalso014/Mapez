@@ -469,3 +469,17 @@ No hecho / pendiente: no verificado contra el Outlook real (sin acceso desde aqu
 Ctrl+V usa el portapapeles de Windows (se devuelve el texto que había; si había una imagen, se pierde — solo pasa si el
 buscador no acepta el texto pegado con `insert_text`); la ventana clásica (Tk) no tiene el calendario; los formatos con
 nombres de mes (`%b`) salen en inglés (como siempre en Python).
+
+
+---
+
+## v3.7 a v3.9 (rama New-tool)
+
+Las notas de diseño de estas versiones están en el **README**, que es el documento que lee el usuario:
+
+* **3.7** — avisos y vista de lo programado (README §25).
+* **3.8** — mapeo del ERP (DevExpress), pasos vacíos que se saltan y listas «por fecha» (README §26).
+* **3.9** — una sola ventana «Programar…» por reporte, «para cada opción» (todas / las que marque), imprimir lo
+  descargado, fechas del mes anterior y repetir por meses o quincenas, actualizaciones automáticas, calendarios de la
+  web rellenados por dentro, PDF que se abren en otra pestaña y mapeo de listas propias (README §27, con el apartado
+  «Para los que programan» en §27.7).

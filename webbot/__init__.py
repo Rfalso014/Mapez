@@ -2,7 +2,7 @@
 
 import os
 
-VERSION = "3.6"
+VERSION = "3.9"
 
 # Carpeta del proyecto (la que contiene bot.py y la carpeta webbot).
 RAIZ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

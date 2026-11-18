@@ -1,8 +1,34 @@
-# Bot Web — descarga automática de reportes (versión 3.6)
+# Bot Web — descarga automática de reportes (versión 3.9)
 
 El bot **abre una página web, repite los pasos que tú le enseñes y descarga el reporte**, sin
 que tengas que estar delante. Puedes verlo trabajar o dejarlo **oculto**, y programarlo para que
 se ejecute solo a una hora. Puedes tener **varios reportes** guardados y ejecutarlos juntos.
+
+**Novedades de la 3.9** (detalles en §27)
+
+* **Una sola ventana «📅 Programar…» por reporte** (§27.1): en ella eliges **qué baja** (todos los comercios o
+  localidades de su lista), **de qué fechas** (el mes anterior entero, los mismos días del mes anterior o dejarlas como
+  están), si **imprime** los PDF y **cada cuánto** se ejecuta solo (cada mes, cada día, cada semana o sin programar).
+  Botones: **Agregar a programar**, **▶ Ejecutar ahora**, **Probar ahora con 1 opción** y **Quitarlo**. La fila del
+  reporte se queda con una **línea que lo dice en palabras** («Cada mes, día 1 a las 07:00 · todas las opciones de
+  «Localidad» (17) · del mes anterior · imprime»), **📅 Programar…** y **▶ Ejecutar**.
+* **Bajar todas las opciones de una lista** (§27.2): «todas, una tras otra» o «las que marque» repiten los pasos
+  siguientes con cada comercio, corte o localidad, con **un archivo por cada uno**.
+* **Imprimir** (§27.3): casilla **«Imprimir los PDF que descargue»** (con la impresora que elijas), paso **«Imprimir»** y
+  botón **Imprimir** en cada archivo descargado.
+* **Fechas que se mueven solas cada mes** (§27.4): el **calendario de dos fechas** (roja «Desde», azul «Hasta»), la
+  casilla **«Descargar en esta fecha cada mes»** y **repetir por meses o quincenas**.
+* **El bot se actualiza solo** (§27.5): aviso **«Hay una nueva actualización»** con botón **Actualizar**.
+* **Mejor con las webs de verdad** (§27.6): rellena los **calendarios de la página** por dentro y **comprueba** que la
+  fecha quedó puesta; guarda los **PDF que se abren en otra pestaña**; el mapeo encuentra las **listas propias** (un
+  recuadro con la lista escondida, como «Localidad»); la ventana **nunca se va de lado** (sin barra horizontal).
+
+**Novedades de la 3.7 y la 3.8** (detalles en §25 y §26)
+
+* **Avisos y vista de lo programado** (3.7): avisar antes de empezar, ver la ejecución en vivo, la ventanita con el
+  progreso y **Detener**, y la lista **«En curso»**.
+* **ERP y webs difíciles** (3.8): el mapeo entiende las rejillas y los calendarios de DevExpress, los pasos que dejas
+  **vacíos se saltan** y las listas pueden elegir **«la de una fecha»**.
 
 **Novedades de la 3.6** (detalles en §24)
 
@@ -424,12 +450,15 @@ esperar, nombre y carpeta de descarga):
 | `{inicio_mes_anterior}` · `{fin_mes_anterior}` | 01/09/2026 · 30/09/2026 |
 | `{lunes_semana}` · `{lunes_semana_anterior}` · `{domingo_semana_anterior}` | (3.6) 19/10/2026 · 12/10/2026 · 18/10/2026 (la semana empieza el lunes) |
 | `{inicio_anio}` | (3.6) 01/01/2026 |
+| `{dia_mes_anterior:15}` | (3.9) 15/09/2026 — el día 15 del mes anterior (si ese mes no tiene ese día, su último día) |
+| `{inicio_quincena_anterior}` · `{fin_quincena_anterior}` | (3.9) la última quincena ya terminada (el día de corte lo eliges tú, §27.4) |
+| `{desde}` · `{hasta}` | (3.9) el primer y el último día del periodo que se está bajando con «Repetir por meses / quincenas» (§27.4) |
 | `{ext}` | extensión del archivo descargado, con punto (`.csv`) — solo en nombres de descarga |
 | `{nombre}` | nombre original del archivo, sin extensión — solo en nombres de descarga |
 | `{secreto:nombre}` | una contraseña guardada (ver más abajo) |
 | `{cliente}` | variable propia (ver abajo) |
 | `{fecha}` · `{fecha:%Y-%m-%d}` | (3.0) el día que se está descargando con «Repetir por días» (§16.5); sin repetir, hoy |
-| `{opcion}` | (3.0) el texto de la opción que eligió el último paso «Elegir opción» (p. ej. `Corte_{opcion}{ext}`) |
+| `{opcion}` | (3.0) el texto de la opción que eligió el último paso «Elegir opción» (p. ej. `Corte_{opcion}{ext}`). Con «todas, una tras otra» (§27.2) es el comercio o la localidad que se está bajando; si no lo pones, el bot añade su nombre al final para que no se pisen |
 | `{{` y `}}` | llaves literales `{` y `}` |
 
 Al editar un paso, el botón **Plantilla…** inserta estas opciones y debajo ves una **vista
@@ -588,6 +617,10 @@ antiguas (`--flujo "…\flujos\ventas.json"`) siguen funcionando: el bot busca e
 ese archivo. Si un archivo no se puede leer, se queda en `flujos/` y se avisa en el registro.
 
 ## 10. Programar ejecuciones
+
+> **Desde la 3.9** todo esto se hace en **una sola ventana**: el botón **📅 Programar…** de cada reporte (§27.1). Ahí
+> eliges qué baja, de qué fechas, si imprime y cada cuánto; **Opciones avanzadas…** abre el editor completo que se
+> explica aquí abajo y en §21.
 
 El botón **Programar** crea una tarea del **Programador de tareas de Windows** (carpeta
 `BotWeb`), diaria o semanal a la hora que elijas. (Desde la 3.4, en la interfaz nueva puedes elegir días, varias horas,
@@ -807,7 +840,7 @@ crean tareas programadas ni usan el ratón o teclado reales (el «ratón» es el
 `tests/test_gui.py` y `tests/test_gui_v23.py` ejercitan el panel Reportes, guardar/renombrar/papelera,
 la lista de pasos, la pregunta «la página pide iniciar sesión» (hilo de trabajo ↔ ventana), los
 cuadros Accesos y Versiones y la actualización de reportes al abrir, sin interacción humana. En total
-unas 294 pruebas; tardan unos 11 minutos. Ninguna muestra notificaciones de Windows (el notificador es
+unas **736 pruebas** (3.9); tardan unos **25 minutos**. Ninguna muestra notificaciones de Windows (el notificador es
 inyectable y no hace nada mientras se ejecuta `unittest`).
 Las pruebas de la versión 1: `cd version_escritorio` y `python -m unittest discover -s tests`.
 
@@ -1560,7 +1593,9 @@ La interfaz tiene un diseño nuevo, oscuro y más compacto, pensado para tenerla
   Ajustes.
 * **Inicio = Centro de control**: arriba cuatro cifras (descargas de hoy, en curso, con error, novedades) con la línea
   de los últimos 7 días; debajo los reportes como filas (punto de estado, archivo y duración, cuándo fue y cuándo toca,
-  «Ejecutar» y, si la web pidió un dato, «Completar Licencia» → Accesos), con filtros «Todos / Con error / Programados»;
+  la línea de **cómo está programado**, **📅 Programar…**, **▶ Ejecutar** y, si la web pidió un dato,
+  «Completar Licencia» → Accesos; la línea y los dos botones son de la 3.9, §27.1), con filtros
+  «Todos / Con error / Programados»;
   a la derecha **En vivo**: lo que va haciendo el bot, al momento; y abajo la novedad de Vigilancia («Descargar este
   corte»), lo último del correo y las próximas ejecuciones.
 * **Buscar o ejecutar (Ctrl K)**: escribe parte de un nombre (sin preocuparte de acentos ni mayúsculas: «charg»,
@@ -1607,6 +1642,11 @@ come o se queda letras**: el bot acababa buscando un texto distinto y no encontr
   el texto de una vez.
 
 ### 24.2 Fechas: calendario o «cambia sola»
+
+> **Ojo (3.9)**: este calendario cambió. Ahora es **un solo calendario con dos fechas** (la roja «Desde» y la azul
+> «Hasta») y se abre desde **📅 Programar… → Elegir las fechas en el calendario…**; las tarjetas «hoy / día anterior /
+> fecha exacta» de la 3.6 ya no están. Lo que se explica aquí sigue valiendo para entender **qué** se guarda en el paso
+> (una fecha fija o una que cambia sola); cómo se elige hoy está en §27.4.
 
 Donde antes había que escribir una fecha (o una plantilla como `{ayer:%d/%m/%Y}`), ahora hay un **botón con la fecha en
 palabras**, por ejemplo **«Ayer · 28/10/2026»** o **«Fecha fija · 15/10/2026»**. Al pulsarlo se abre un calendario con dos
@@ -1720,3 +1760,175 @@ mensual a las 00:00— y leído por el Programador de Windows sin registrar nada
 un reloj falso, cancelar / empezar ya / ver en vivo, los avisos con el notificador falso, Detener desde la ventanita, la
 línea de comandos con un ejecutor falso, la API, la ventanita y, con navegador oculto, «Programar…», «En curso» y el
 interruptor de «Lo programado»).
+
+
+---
+
+## 26. Novedades de la 3.8: webs difíciles (ERP) y pasos que se saltan
+
+* **Mapear el ERP**: el mapeo entiende las webs hechas con DevExpress (las del ERP): la fila de filtros de una tabla ya
+  no sale como 18 filtros sueltos (ahora cada uno lleva el nombre de su columna y va al grupo «Filtros de las columnas
+  de la tabla»), el buscador de la web no se confunde con un filtro, los campos dobles «código + descripción» (Empleado,
+  Ubicación) salen como **un** filtro con su lupa, y las casillas dibujadas (que no son `<input>`) se ven y se marcan.
+* **Calendarios del ERP**: en esos campos de fecha el bot ya no escribe el texto y se queda tan tranquilo: pone la fecha
+  **con el propio calendario** y comprueba que quedó puesta. (En la 3.9 esto se amplió a los calendarios de otras webs:
+  §27.6.)
+* **Pasos que dejas vacíos**: si borras el texto de un paso «Escribir» o la opción de un «Elegir opción», el paso **se
+  salta** en vez de fallar («sin valor: se salta este paso»), y en el registro se ve.
+* **Listas por fecha**: una lista puede elegir **«la de una fecha»** (hoy, ayer o un día exacto); si el reporte de esa
+  fecha todavía no está, el bot **no baja otro**: lo dice y para.
+* **Ruta del bot**: el instalador y los accesos directos funcionan aunque la carpeta tenga espacios o acentos.
+
+---
+
+## 27. Novedades de la 3.9: todo en una ventana, todas las opciones e imprimir
+
+### 27.1 Una sola ventana: «📅 Programar…»
+
+En la fila de cada reporte (en **Inicio** y en **Reportes**) hay ahora tres cosas:
+
+1. una **línea que dice cómo está**, por ejemplo
+   «**Cada mes, día 1 a las 07:00 · todas las opciones de «Localidad» (17) · del mes anterior · imprime**»
+   (o «**Sin programar**»); se puede pulsar y abre la ventana;
+2. **📅 Programar…**;
+3. **▶ Ejecutar**.
+
+Los botones sueltos de antes («Fecha: …», «Imprimir PDF: …», «Descargar todas» y «Programar») **ya no están**: todo eso
+se hace dentro de la ventana, que tiene cuatro partes:
+
+* **Qué baja** — casilla **«Todas las opciones de «Localidad» (17)»** (con el nombre de la lista del reporte y cuántas
+  opciones tiene la última vez que se leyeron). Si el reporte no tiene ninguna lista, lo dice en una línea y lo demás
+  sigue funcionando.
+* **De qué fechas** — **«Bajará el mes anterior entero (del día 1 al último día)»**, **«Bajará del día N al M del mes
+  anterior»** (solo si tus fechas son un trozo del mes) o **«No tocar las fechas del reporte»**. Debajo ves en pequeño
+  lo que pasaría hoy: «si se ejecuta hoy, bajaría del 01/10/2026 al 31/10/2026». El botón **«Elegir las fechas en el
+  calendario…»** abre el calendario de dos fechas (§27.4) por si quieres otras.
+* **Imprimir** — la casilla **«Imprimir los PDF que descargue»** y la impresora (§27.3).
+* **Cuándo** — **Cada mes** (día del mes y hora; por defecto el día 1 a las 07:00), **Cada día** (hora), **Cada semana**
+  (día de la semana y hora) o **Sin programar**. **Opciones avanzadas…** abre el editor de siempre (§21) para horarios
+  más raros: varias horas, cada N horas, fechas de inicio y fin, «Avisos y vista» y quitar la tarea de Windows.
+
+Abajo, una frase resume **todo** lo elegido y cambia mientras tocas:
+«El día 1 de cada mes, a las 07:00, bajará las 17 opciones de «Localidad» del mes anterior entero (34 archivos) e
+imprimirá los PDF en «Impresora Oficina».»
+
+Botones:
+
+| Botón | Qué hace |
+|---|---|
+| **Agregar a programar** | Lo deja todo puesto de una vez: la lista en «todas, una tras otra», las fechas del mes anterior, la impresión y la tarea de Windows a esa hora. Antes de cambiar nada guarda una **copia del reporte** («antes de programar «cada mes: bajar todo e imprimir»»), que puedes restaurar en **Versiones anteriores**. |
+| **▶ Ejecutar ahora** | Lo baja **ya**, con lo que hay elegido en la ventana (todas las opciones, esas fechas y esa impresora). **No cambia** los pasos guardados. |
+| **Probar ahora con 1 opción** | Lo mismo, pero con **una sola** opción de la lista: para ver un PDF bajado (e impreso) antes de fiarte del horario. |
+| **Quitarlo** | Deja de ejecutarse solo y de imprimir (los pasos del reporte se quedan como están). |
+
+Si el reporte ya tenía **otro horario** (por ejemplo «de lunes a viernes a las 09:00»), la ventana lo dice y **no lo
+cambia sin avisar**: hay que confirmarlo.
+
+Lo que quede programado se ve en **Inicio** (filtro «Programados») y también en **Vigilancia**, en un bloque nuevo
+**«Se bajan solos»** con cada reporte, su línea en palabras y los botones **📅 Programar…** y **▶ Ejecutar**.
+
+### 27.2 Bajar todas las opciones de una lista (un archivo por comercio)
+
+En un paso **«Elegir opción»** (o en el mapeo, §27.6) las maneras de elegir ahora incluyen:
+
+* **todas, una tras otra** — el bot recorre **todas** las opciones de la lista (los 17 comercios, los cortes, las
+  localidades…) y **repite con cada una** los pasos que vengan después;
+* **las que marque** — igual, pero solo con las que marques en una lista de casillas.
+
+Cada vuelta deja **sus** archivos: si no pones `{opcion}` en el nombre, el bot le añade al final el nombre de la opción
+(«Comprobantes 2026-11-18 - TIENDA 1.pdf»), para que no se pisen. En el registro se ve
+«=== Opción «TIENDA 1» de «Localidad» (1 de 17) ===» y, al final, «Para cada opción de «Localidad»: 17 de 17 bien».
+
+* Si una opción falla, **se apunta y sigue con la siguiente**; al terminar el reporte queda marcado como fallido con lo
+  que falló, pero **lo demás se descargó**.
+* Para que la repetición no llegue hasta el final del reporte, marca un paso con **«Aquí termina «para cada opción»»**:
+  lo que vaya después se hace **una sola vez**.
+* Se pueden anidar (cada sucursal × cada tabla).
+* **«Al terminar, ejecutar otro reporte»**: en las opciones del reporte puedes encadenar otro (siempre, solo si terminó
+  bien o solo si falló), por ejemplo para juntar «bajar» y «enviar por correo».
+
+### 27.3 Imprimir lo que se baja
+
+Tres maneras, todas con el programa de Windows para ese tipo de archivo (como «clic derecho → Imprimir»):
+
+* **«Imprimir los PDF que descargue»** (en la ventana «📅 Programar…» y en el editor del reporte): cada PDF que baje el
+  reporte se manda a la impresora **nada más guardarlo**, también el de cada comercio. Los **Excel y CSV no** se
+  imprimen. Si la impresora falla, **el archivo se descarga igual** y el registro dice por qué no se imprimió.
+* **Paso «Imprimir»**: imprime el último archivo descargado o la página que se ve, en la impresora que elijas.
+* **Botón «Imprimir»** en cada archivo de la lista de descargas.
+
+Notas:
+
+* Los PDF se imprimen **aunque no tengas un lector de PDF instalado** (Windows trae el suyo).
+* Si eliges una impresora que **no saca papel** («Microsoft Print to PDF», XPS, OneNote…), el bot le dice **dónde
+  guardar** el archivo (al lado del descargado, con «(impreso)» en el nombre) en vez de quedarse esperando una ventana
+  que nadie ve; la ventana te avisa en una línea.
+* El **botón de imprimir del visor de PDF del navegador** (la impresora de arriba, cuando el reporte se abre como PDF)
+  **no se puede pulsar**: es del navegador, no de la página. Si grabas ahí, el bot te lo dice; y si un reporte antiguo
+  tiene ese paso, lo **salta** cuando el reporte ya imprime sus PDF, o te explica qué hacer.
+
+### 27.4 Fechas que se mueven solas cada mes
+
+* **Un calendario con dos fechas**: la **roja** es «Desde» y la **azul** es «Hasta» (si el reporte solo tiene un campo de
+  fecha, solo hay roja). Debajo se lee en palabras lo que hay guardado: «Ahora baja: del 01/10/2026 al 31/10/2026» o
+  «el día de hoy (cada día cambia)».
+* **«Descargar en esta fecha cada mes»**: lo elegido se guarda como **esa misma fecha del mes anterior** cada vez que se
+  ejecute — el día 1 → `{inicio_mes_anterior}`, el último día del mes → `{fin_mes_anterior}`, otro día N →
+  `{dia_mes_anterior:N}`. Así, el 1 de diciembre baja todo noviembre y el 1 de enero, todo diciembre.
+* **Repetir por días** (ya estaba), **por meses** y **por quincenas**: el reporte se ejecuta **una vez por periodo** y
+  cada archivo lleva su periodo en el nombre. En las quincenas eliges el **día de corte** (por ejemplo 16) y **qué
+  quincenas** (las dos, solo la primera o solo la segunda). Puedes pedir **solo el periodo que acaba de terminar** o
+  **ponerse al día** (bajar los que falten desde una fecha). En los campos de fecha se usan `{desde}` y `{hasta}`: el
+  primer y el último día del periodo que se está bajando.
+
+### 27.5 El bot se actualiza solo
+
+* Cuando hay una versión nueva, arriba aparece **«Hay una nueva actualización»** con el botón **Actualizar**: el bot se
+  baja la versión nueva, la instala y se reinicia solo. Debajo se ve **qué cambió** (el último cambio publicado).
+* En **Ajustes → Acerca de** están la versión que tienes y el botón **Buscar actualizaciones**.
+* Tanto el instalador como las actualizaciones vienen de la rama **New-tool** del repositorio.
+
+### 27.6 Con las webs de verdad
+
+* **Calendarios de la página**: al escribir una fecha, si el campo tiene un calendario propio (de los habituales:
+  bootstrap-datepicker, jQuery UI, flatpickr, Kendo o el del navegador), el bot pone la fecha **por dentro del
+  calendario** y **comprueba** que quedó puesta; si el calendario no la acepta (por ejemplo una fecha futura), el paso
+  **falla con un aviso claro** en vez de seguir con otra fecha. Los clics del calendario que quedaran grabados junto a
+  una fecha escrita se **saltan**, porque el día y el mes que marcaste al grabar ya no valen hoy.
+* **Reportes que se abren como PDF en otra pestaña**: el bot **guarda ese PDF** (con el nombre de siempre) aunque el
+  botón «Download» sea del visor del navegador y no de la página, y **cierra** esa pestaña. La primera vez abre la
+  pestaña un segundo; a partir de ahí **pide el PDF sin abrir nada**, así que al bajar 17 comercios ya no se ve una
+  pestaña abrirse y cerrarse 17 veces.
+* **Listas propias en el mapeo**: «Mapear página» ahora encuentra también las listas que **no** son un desplegable
+  normal — un recuadro que se pulsa y enseña una lista escondida de filas (como «Localidad» en el portal de Pagos) — con
+  su nombre y sus opciones (sin el buscador ni el título del grupo). Al traerla puedes elegir **«todas, una tras otra»**
+  o **«las que marque»**, y hay un botón **⬇ Descargar todas** para probarlo ahí mismo.
+* **Lista de descargas en vivo**: mientras baja muchas cosas, el bot enseña «Se van a bajar 17 × 2 = 34 archivos» y cada
+  archivo va pasando por **esperando → bajando → listo** (y «impreso», si imprime).
+* **La ventana nunca se va de lado**: no hay barra de desplazamiento horizontal ni en una pantalla pequeña; los nombres
+  largos se parten en varias líneas.
+
+### 27.7 Para los que programan
+
+* `webbot/flujo.py`: estrategias `cada_una` y `marcadas` (`ESTRATEGIAS_BUCLE`, `es_bucle`, `fin_del_bucle`,
+  `opciones_del_bucle`, `listas_para_todas`), `fin_bucle` en el paso, opción `imprimir_pdf`, periodos
+  (`MODOS_PERIODO`, `periodos_a_repetir`, `nombre_con_periodo`) y `reportes_siguientes` («Al terminar…»).
+* `webbot/ejecutor.py`: `_recorrer_con_opciones` / `_bucle_de_opciones` (una vuelta por opción, con sufijo en el nombre
+  de los archivos), `JS_CALENDARIO_PONER_FECHA` (+ `_fecha_calendario`), `JS_PDF_SIN_PESTANA` y `_pdf_sin_pestana` /
+  `_pdf_ya_abierto` / `_guardar_pdf_abierto` (PDF en otra pestaña), `_imprimir_pdf` y `_paso_imprimir`.
+* `webbot/impresion.py`: `impresoras()`, `imprimir_archivo(ruta, impresora, salida=…)`, `imprime_a_un_archivo`,
+  `_imprimir_pdf_windows` (el lector de PDF de Windows por PowerShell) y mensajes de error en español.
+* `webbot/fechas_reporte.py`: `campos_de_fecha`, `aplicar_eleccion`, `programacion_mensual` / `programacion_sencilla`,
+  `como_esta_programado`, `texto_cuando`, `mes_anterior`, `dias_guardados`.
+* `webbot/mapeador.js`: `listasDeFilasOcultas` (recuadro + lista escondida de filas con radios ocultos) y las reglas que
+  evitan confundir menús o grupos de botones con listas.
+* `webbot/servidor_ui.py`: `GET/POST /api/reportes/<id>/cada_mes` (la ventana entera: ver, aplicar, quitar y probar),
+  `GET/POST /api/reportes/<id>/todas`, `GET /api/programados`, `GET /api/impresoras`, `POST /api/archivos/imprimir`.
+* `webbot/actualizar.py` y `webbot/lista_descargas.py`: las actualizaciones y la lista de descargas en vivo.
+
+Pruebas: `tests/test_v39_pagos.py` (calendarios de la web, PDF en otra pestaña, «para cada opción» y el mapeo de la
+lista propia, con un sitio de prueba nuevo `tests/sitio_prueba/pagos_consulta.html`),
+`tests/test_v39_impresion_todas.py` (impresión con impresoras falsas, «Descargar todas» y la ventana «Programar»),
+`tests/test_v39_periodos.py`, `tests/test_v39_fechas_impresion.py`, `tests/test_v39_interfaz.py`,
+`tests/test_v39_actualizar.py` y `tests/test_integracion_v39.py`. Nunca se imprime de verdad, ni se tocan la base de
+datos real, el llavero, la red ni el Programador de tareas.

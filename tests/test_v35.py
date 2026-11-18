@@ -247,7 +247,7 @@ class TestApiNombres(SinDialogos):
         self.assertEqual(v["vista"], "Nombre del reporte - nombre_que_da_la_web.xlsx")
         self.assertIn("{reporte}", [x[0] for x in self.api("GET", "ayuda")["plantillas"]])
         self.assertEqual(self.api("GET", "estado")["version"], VERSION)
-        self.assertEqual(VERSION, "3.6")
+        self.assertEqual(VERSION, "3.9")
 
 
 # ============================================================================ 2. elegir carpeta / archivo
