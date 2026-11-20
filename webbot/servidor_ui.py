@@ -119,6 +119,12 @@ def _paso_dict(p, i=None):
     return d
 
 
+def _nombre_carpeta(nombre):
+    """v3.9: el nombre del reporte como carpeta (sin caracteres que Windows no admite)."""
+    from .ejecutor import nombre_archivo_seguro
+    return nombre_archivo_seguro(nombre)
+
+
 def _flujo_desde(datos):
     if not isinstance(datos, dict):
         raise ErrorApi("Falta el reporte")
@@ -1128,6 +1134,7 @@ class Aplicacion:
             cambios += self._poner_todas(nuevo, vista, datos.get("todas") is not False)
             cambios += self._poner_fechas_mes(nuevo, vista, str(datos.get("fechas") or "mes_completo"))
             cambios += self._poner_imprimir(nuevo, imprimir)
+            cambios += self._poner_carpeta_mes(nuevo, datos.get("carpeta_mes"))
             p = mod_fechas.programacion_sencilla(modo, dia, hora, dia_semana,
                                                  ((alm.programacion("reporte:%d" % rid) or {})
                                                   .get("programacion") or {}).get("ejecucion"))
@@ -1186,6 +1193,28 @@ class Aplicacion:
             return ["no se imprimirá nada"]
         return ["imprimir los PDF en «%s»" % (conf["impresora"] or "la impresora de Windows")]
 
+    def _poner_carpeta_mes(self, nuevo, activo):
+        """v3.9: «Guardar cada mes en su propia carpeta» (los archivos de cada mes, quincena o día, en la suya)."""
+        if activo is None:
+            return []
+        activo = activo is True
+        if mod_flujo.carpeta_por_periodo(nuevo.opciones) == activo:
+            return []
+        if activo:
+            nuevo.opciones["carpeta_por_periodo"] = True
+            return ["cada mes en su propia carpeta"]
+        nuevo.opciones.pop("carpeta_por_periodo", None)
+        return ["todo en la misma carpeta (sin carpeta por mes)"]
+
+    def _carpeta_de_ejemplo(self, fl):
+        """v3.9: la ruta que saldría hoy con «Guardar cada mes en su propia carpeta» (para enseñarla en la ventana)."""
+        from . import fechas_reporte as mod_fechas
+        base = (fl.opciones.get("carpeta_descargas") or "").strip() or self._carpeta_descargas()
+        if not os.path.isabs(base):
+            base = os.path.join(self._carpeta_descargas(), base)
+        inicio, fin = mod_fechas.mes_anterior(self.hoy)
+        return os.path.join(base, _nombre_carpeta(fl.nombre or "Reporte"), mod_flujo.carpeta_de_periodo(inicio, fin))
+
     def _quitar_horario(self, rid, fila):
         """Quita la tarea de Windows y la programación guardada del reporte (si las tenía)."""
         alm = self.almacen
@@ -1223,6 +1252,7 @@ class Aplicacion:
         try:
             self._poner_fechas_mes(nuevo, vista, str(datos.get("fechas") or "mes_completo"))
             self._poner_imprimir(nuevo, datos.get("imprimir") or {})
+            self._poner_carpeta_mes(nuevo, datos.get("carpeta_mes"))
         except Exception as e:      # noqa: BLE001
             raise ErrorApi(str(e))
         lista = vista["lista"]
@@ -1285,7 +1315,9 @@ class Aplicacion:
         # cuántos archivos baja cada opción (para decir «34 archivos»)
         dentro = range(int(lista["paso"]) + 1, len(fl.pasos)) if lista else range(len(fl.pasos))
         por_opcion = len([i for i in dentro if fl.pasos[i].tipo in mod_flujo.TIPOS_QUE_GUARDAN and not fl.pasos[i].desactivado])
+        carpeta = {"activo": mod_flujo.carpeta_por_periodo(fl.opciones), "ejemplo": self._carpeta_de_ejemplo(fl)}
         return {"id": rid, "nombre": fila["nombre"], "lista": lista, "fechas": fechas, "archivos_por_opcion": por_opcion,
+                "carpeta": carpeta,
                 "imprimir": {"activo": conf["activo"], "impresora": conf["impresora"], "sugerida": sugerida,
                              "impresoras": info["impresoras"], "predeterminada": info["predeterminada"],
                              "a_archivo": mod_impresion.imprime_a_un_archivo(conf["impresora"] or sugerida)},

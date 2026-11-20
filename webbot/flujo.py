@@ -1501,6 +1501,41 @@ def describir_periodo(desde, hasta):
     return "del %s al %s" % (desde.strftime("%d/%m/%Y"), hasta.strftime("%d/%m/%Y"))
 
 
+# v3.9: «Guardar cada mes en su propia carpeta» (opciones["carpeta_por_periodo"]).  El nombre lleva primero el año y el
+# mes (así las carpetas se ordenan solas) y luego el mes en palabras.  Sin tildes ni caracteres que Windows no admite.
+def carpeta_de_periodo(desde, hasta=None):
+    """Nombre de la carpeta del periodo que se está bajando:
+
+    - mes entero: «2026-11 noviembre»;
+    - quincena:   «2026-11 noviembre 1a quincena» / «… 2a quincena»;
+    - un día:     «2026-11-17»;
+    - otro trozo de un mes: «2026-11 noviembre 05-20»;
+    - varios meses: «2026-10-01 a 2026-11-15».
+    """
+    import calendar as _cal
+    hasta = hasta or desde
+    if hasta < desde:
+        desde, hasta = hasta, desde
+    if desde == hasta:
+        return desde.strftime("%Y-%m-%d")
+    if (desde.year, desde.month) != (hasta.year, hasta.month):
+        return "%s a %s" % (desde.strftime("%Y-%m-%d"), hasta.strftime("%Y-%m-%d"))
+    mes = "%s %s" % (desde.strftime("%Y-%m"), _NOMBRES_MES[desde.month - 1])
+    ultimo = _cal.monthrange(desde.year, desde.month)[1]
+    if desde.day == 1 and hasta.day == ultimo:
+        return mes
+    if desde.day == 1:
+        return "%s 1a quincena" % mes
+    if hasta.day == ultimo:
+        return "%s 2a quincena" % mes
+    return "%s %02d-%02d" % (mes, desde.day, hasta.day)
+
+
+def carpeta_por_periodo(opciones):
+    """True si el reporte guarda cada mes (o quincena, o día) en su propia carpeta."""
+    return (opciones or {}).get("carpeta_por_periodo") is True
+
+
 def describir_periodos(conf):
     """En palabras, para la interfaz y los registros: «por meses, del 01/02/2026 al 30/06/2026», «por quincenas (corte el
     día 15), la que acaba de terminar»…"""

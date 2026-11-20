@@ -837,6 +837,7 @@ class ResultadoEjecucion:
         self.periodos = []         # v3.9: [(desde, hasta)] de «Repetir por meses / quincenas» (vacío = no)
         self.opciones_bucle = []   # v3.9: «para cada opción»: [{paso, lista, bien: [textos], fallos: [(texto, motivo)]}]
         self.impresiones = []      # v3.9: lo que mandó a imprimir el paso «Imprimir»: [{archivo, impresora}]
+        self.carpetas = []         # v3.9: carpetas donde se guardaron archivos (la primera, la del primer periodo)
         self.sin_imprimir = []     # v3.9: «Imprimir los PDF…»: los PDF que no se pudieron imprimir [(archivo, motivo)]
 
     def resumen(self):
@@ -873,6 +874,10 @@ class ResultadoEjecucion:
                 txt += " (%s)" % ", ".join(extra)
             if self.archivos:
                 txt += "; archivos: " + ", ".join(self.archivos)
+            if self.carpetas:          # v3.9: dónde han quedado (con «cada mes en su carpeta», una por periodo)
+                txt += "; los archivos se guardaron en %s" % (
+                    self.carpetas[0] if len(self.carpetas) == 1
+                    else "%d carpetas (la primera: %s)" % (len(self.carpetas), self.carpetas[0]))
             return txt
         if self.detenido:
             return "Detenido por el usuario en el paso %s" % (self.paso_fallido or "?")
@@ -1034,6 +1039,7 @@ class Ejecutor:
         self.dias = dias
         self.fecha = None
         self.periodo = None             # v3.9: (desde, hasta) del pase en curso ({desde} y {hasta})
+        self._carpeta_periodo = (None, "")   # v3.9: (clave, nombre) de la carpeta del periodo, calculada una vez
         self._fallos_bucle = []         # v3.9: opciones de «para cada opción» que fallaron (se sigue con las demás)
         # v3.9: «Imprimir los PDF que descargue»: imprimir(ruta, impresora, log) (None = impresion.imprimir_archivo); y
         # la lista de todo lo que baja una ejecución grande: lista_descargas(datos) en cada cambio (ver lista_descargas)
@@ -3428,11 +3434,70 @@ class Ejecutor:
         return False
 
     # ------------------------------------------------------------ archivos
+    def _carpeta_del_periodo(self):
+        """v3.9 «Guardar cada mes en su propia carpeta»: el nombre de la carpeta de este pase («2026-11 noviembre»), o
+        "" si el reporte no lo usa.  Con «Repetir por meses / quincenas / días» es el periodo que se está bajando; sin
+        repetición, las fechas que el reporte escribe (si no las hay, el mes de hoy)."""
+        if not mod_flujo.carpeta_por_periodo(self.flujo.opciones):
+            return ""
+        clave = (self.periodo, self.fecha)
+        if self._carpeta_periodo[0] == clave:
+            return self._carpeta_periodo[1]
+        if self.periodo:
+            nombre = mod_flujo.carpeta_de_periodo(*self.periodo)
+        elif self.fecha:
+            nombre = mod_flujo.carpeta_de_periodo(self.fecha, self.fecha)
+        else:
+            desde, hasta = self._fechas_del_reporte()
+            nombre = mod_flujo.carpeta_de_periodo(desde, hasta)
+        self._carpeta_periodo = (clave, nombre)
+        return nombre
+
+    def _fechas_del_reporte(self):
+        """v3.9: (desde, hasta) que el reporte va a escribir en sus campos de fecha; si no se saben, el mes de hoy."""
+        from . import fechas_reporte as mod_fechas
+        hoy = self.hoy or datetime.date.today()
+        if isinstance(hoy, datetime.datetime):
+            hoy = hoy.date()
+        dias = {}
+        try:
+            campos, _ = mod_fechas.campos_de_fecha(self.flujo)
+        except Exception:              # noqa: BLE001 (un reporte raro no debe impedir guardar el archivo)
+            campos = []
+        for c in campos:
+            if c["rol"] not in ("desde", "hasta", "unica"):
+                continue
+            try:
+                fecha, _f = leer_fecha(self._r(c["valor"]))
+            except Exception:          # noqa: BLE001
+                fecha = None
+            if fecha is not None:
+                dias[c["rol"]] = fecha
+        desde = dias.get("desde") or dias.get("unica")
+        hasta = dias.get("hasta") or dias.get("unica") or desde
+        if desde is None:
+            import calendar
+            return hoy.replace(day=1), hoy.replace(day=calendar.monthrange(hoy.year, hoy.month)[1])
+        return desde, hasta or desde
+
     def _destino(self, nombre, carpeta_plantilla, ext=None):
+        """Dónde se guarda un archivo.  Con «Guardar cada mes en su propia carpeta» se añade la carpeta del periodo:
+        si el paso tiene su propia carpeta, DENTRO de ella («…/PDFs/2026-11 noviembre»); si no, dentro de una carpeta
+        con el nombre del reporte («…/descargas/Comprobantes de Pagos/2026-11 noviembre»), para que dos reportes no mezclen sus
+        archivos cuando comparten la carpeta de descargas."""
         carpeta = self._r(carpeta_plantilla) if carpeta_plantilla else self.carpeta_descargas
         if not os.path.isabs(carpeta):
             carpeta = os.path.join(self.carpeta_descargas, carpeta)
+        periodo = self._carpeta_del_periodo()
+        if periodo:
+            if not carpeta_plantilla:
+                carpeta = os.path.join(carpeta, nombre_archivo_seguro(self.flujo.nombre or "Reporte"))
+            carpeta = os.path.join(carpeta, nombre_archivo_seguro(periodo))
         os.makedirs(carpeta, exist_ok=True)
+        if carpeta not in self.resultado.carpetas:
+            self.resultado.carpetas.append(carpeta)
+            if periodo:
+                self._log("    (los archivos de este periodo se guardan en: %s)" % carpeta)
         destino = os.path.join(carpeta, nombre)
         if self.flujo.opcion("si_existe") != "sobrescribir":
             destino = ruta_libre(destino, ext)
@@ -3943,8 +4008,8 @@ class Ejecutor:
                 por_periodos = self.dias is None and mod_flujo.es_por_periodos(self.flujo.opciones.get("repetir_dias"))
                 res.dias = [] if por_periodos else [d for d, _h in periodos]
                 res.periodos = list(periodos) if por_periodos else []
-                if por_periodos and len(periodos) > 1:
-                    self._nombres_por_periodo()
+                if por_periodos and len(periodos) > 1 and not mod_flujo.carpeta_por_periodo(self.flujo.opciones):
+                    self._nombres_por_periodo()      # (con una carpeta por periodo no hace falta: no se pisan)
                 self._crear_lista(periodos, por_periodos)
                 for n, periodo in enumerate(periodos or [None], 1):
                     self._pase = n - 1

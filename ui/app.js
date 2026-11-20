@@ -1729,10 +1729,11 @@
       : (e.fechas === 'mismos_dias' && v.fechas.parcial ? ' del día ' + v.fechas.parcial.desde + ' al ' + v.fechas.parcial.hasta + ' del mes anterior'
         : ' del mes anterior entero');
     const archivos = (n && e.todas && v.archivos_por_opcion) ? ' (' + (n * v.archivos_por_opcion) + ' archivos)' : '';
+    const carpeta = e.carpeta_mes ? ', cada mes en su propia carpeta,' : '';
     const imp = e.imprimir.activo ? ' e imprimirá los PDF en «' + (e.imprimir.impresora || 'la impresora de Windows') + '»'
       : ' y no imprimirá nada';
-    if (e.cuando.modo === 'no') return 'Cuando pulses «Ejecutar», ' + que + cuando + archivos + imp + '.';
-    return textoCuandoJS(e.cuando) + ', ' + que + cuando + archivos + imp + '.';
+    if (e.cuando.modo === 'no') return 'Cuando pulses «Ejecutar», ' + que + cuando + archivos + carpeta + imp + '.';
+    return textoCuandoJS(e.cuando) + ', ' + que + cuando + archivos + carpeta + imp + '.';
   }
 
   async function modalProgramar(x) {
@@ -1759,6 +1760,13 @@
       ? h('div', null, rMes.el, rDias ? rDias.el : null, rNo.el,
           h('p', { class: 'ayuda' }, v.fechas.ejemplo), verCalendario)
       : h('p', { class: 'ayuda' }, 'Este reporte no tiene campos de fecha: no hay nada que cambiar aquí.');
+    // 2 bis) una carpeta por mes
+    const cbCarpeta = h('input', { type: 'checkbox', checked: !!(v.carpeta && v.carpeta.activo), 'data-cm-carpeta': '1' });
+    const cajaCarpeta = h('div', null,
+      h('label', { class: 'casilla' }, cbCarpeta, h('span', null, 'Guardar cada mes en su propia carpeta')),
+      h('p', { class: 'ayuda' }, 'Los archivos de cada mes van a una carpeta nueva, que el bot crea solo. Por ejemplo: ' +
+        ((v.carpeta && v.carpeta.ejemplo) || '') + '. Con «Repetir por quincenas» o «por días» la carpeta es de cada quincena o día. ' +
+        'Si un paso tiene su propia carpeta, la del mes se crea dentro de ella.'));
     // 3) imprimir
     const cas = casillaImprimir({ activo: v.imprimir.activo, impresora: v.imprimir.impresora || v.imprimir.sugerida }, () => pintar());
     const avisoImp = h('p', { class: 'ayuda aviso-imp oculto' });
@@ -1786,7 +1794,7 @@
     const eleccion = () => ({
       todas: v.lista ? cbTodas.checked : false,
       fechas: v.fechas.campos ? (rMes.r.checked ? 'mes_completo' : (rDias && rDias.r.checked ? 'mismos_dias' : 'no_tocar')) : 'no_tocar',
-      imprimir: cas.leer(),
+      imprimir: cas.leer(), carpeta_mes: cbCarpeta.checked,
       cuando: { modo: selModo.value, dia: parseInt(inpDia.value, 10) || 1, hora: inpHora.value || '07:00', dia_semana: selDiaSem.value },
     });
     const esDeArchivo = (n) => /print to pdf|imprimir en pdf|xps|onenote|pdf24|bullzip|cutepdf|dopdf|pdfcreator|fax/i.test(n || '');
@@ -1803,7 +1811,7 @@
       inpHora.classList.toggle('oculto', m === 'no');
       etqHora.classList.toggle('oculto', m === 'no');
     }
-    [cbTodas, rMes.r, rNo.r, inpDia, inpHora, selModo, selDiaSem].concat(rDias ? [rDias.r] : []).forEach((c) => {
+    [cbTodas, cbCarpeta, rMes.r, rNo.r, inpDia, inpHora, selModo, selDiaSem].concat(rDias ? [rDias.r] : []).forEach((c) => {
       c.addEventListener('change', pintar); c.addEventListener('input', pintar);
     });
     pintar();
@@ -1854,6 +1862,7 @@
       contenido: h('div', { class: 'cada-mes', 'data-modal-cada-mes': String(x.id) },
         h('h4', null, 'Qué baja'), lineaLista,
         h('h4', null, 'De qué fechas'), cajaFechas,
+        h('h4', null, 'Dónde se guarda'), cajaCarpeta,
         h('h4', null, 'Imprimir'), cas.el, avisoImp,
         h('h4', null, 'Cuándo'),
         h('div', { class: 'fila' }, selModo, etqDia, inpDia, selDiaSem, etqHora, inpHora),

@@ -16,6 +16,8 @@ se ejecute solo a una hora. Puedes tener **varios reportes** guardados y ejecuta
   siguientes con cada comercio, corte o localidad, con **un archivo por cada uno**.
 * **Imprimir** (§27.3): casilla **«Imprimir los PDF que descargue»** (con la impresora que elijas), paso **«Imprimir»** y
   botón **Imprimir** en cada archivo descargado.
+* **Una carpeta por mes** (§27.1): casilla **«Guardar cada mes en su propia carpeta»**; lo de cada mes (o quincena, o
+  día) queda en una carpeta nueva con el mes que se está bajando: «2026-10 octubre».
 * **Fechas que se mueven solas cada mes** (§27.4): el **calendario de dos fechas** (roja «Desde», azul «Hasta»), la
   casilla **«Descargar en esta fecha cada mes»** y **repetir por meses o quincenas**.
 * **El bot se actualiza solo** (§27.5): aviso **«Hay una nueva actualización»** con botón **Actualizar**.
@@ -1794,7 +1796,7 @@ En la fila de cada reporte (en **Inicio** y en **Reportes**) hay ahora tres cosa
 3. **▶ Ejecutar**.
 
 Los botones sueltos de antes («Fecha: …», «Imprimir PDF: …», «Descargar todas» y «Programar») **ya no están**: todo eso
-se hace dentro de la ventana, que tiene cuatro partes:
+se hace dentro de la ventana, que tiene cinco partes:
 
 * **Qué baja** — casilla **«Todas las opciones de «Localidad» (17)»** (con el nombre de la lista del reporte y cuántas
   opciones tiene la última vez que se leyeron). Si el reporte no tiene ninguna lista, lo dice en una línea y lo demás
@@ -1803,6 +1805,13 @@ se hace dentro de la ventana, que tiene cuatro partes:
   anterior»** (solo si tus fechas son un trozo del mes) o **«No tocar las fechas del reporte»**. Debajo ves en pequeño
   lo que pasaría hoy: «si se ejecuta hoy, bajaría del 01/10/2026 al 31/10/2026». El botón **«Elegir las fechas en el
   calendario…»** abre el calendario de dos fechas (§27.4) por si quieres otras.
+* **Dónde se guarda** — casilla **«Guardar cada mes en su propia carpeta»**: los archivos de cada mes van a una carpeta
+  nueva que el bot crea solo, por ejemplo `…\descargas\Comprobantes de Pagos\2026-10 octubre\` (primero el año y el mes, para que
+  se ordenen solas, y después el mes en palabras). La carpeta es la **del mes que se baja**, no la del día en que se
+  ejecuta: una ejecución del 1 de diciembre que baje noviembre va a «2026-11 noviembre». Con «Repetir por quincenas» o
+  «por días» la carpeta es de cada quincena («2026-11 noviembre 1a quincena») o de cada día («2026-11-17»); sin
+  repetición, la del mes de las fechas que escribe el reporte. Si un paso tiene **su propia carpeta**, la del mes se
+  crea **dentro** de ella. Nada se borra ni se pisa: si el archivo ya existe, el nuevo se guarda como «… (2)».
 * **Imprimir** — la casilla **«Imprimir los PDF que descargue»** y la impresora (§27.3).
 * **Cuándo** — **Cada mes** (día del mes y hora; por defecto el día 1 a las 07:00), **Cada día** (hora), **Cada semana**
   (día de la semana y hora) o **Sin programar**. **Opciones avanzadas…** abre el editor de siempre (§21) para horarios
@@ -1876,7 +1885,8 @@ Notas:
   ejecute — el día 1 → `{inicio_mes_anterior}`, el último día del mes → `{fin_mes_anterior}`, otro día N →
   `{dia_mes_anterior:N}`. Así, el 1 de diciembre baja todo noviembre y el 1 de enero, todo diciembre.
 * **Repetir por días** (ya estaba), **por meses** y **por quincenas**: el reporte se ejecuta **una vez por periodo** y
-  cada archivo lleva su periodo en el nombre. En las quincenas eliges el **día de corte** (por ejemplo 16) y **qué
+  cada archivo lleva su periodo en el nombre (si tienes «Guardar cada mes en su propia carpeta», §27.1, no hace falta:
+  cada periodo ya está en su carpeta y los nombres se quedan limpios). En las quincenas eliges el **día de corte** (por ejemplo 16) y **qué
   quincenas** (las dos, solo la primera o solo la segunda). Puedes pedir **solo el periodo que acaba de terminar** o
   **ponerse al día** (bajar los que falten desde una fecha). En los campos de fecha se usan `{desde}` y `{hasta}`: el
   primer y el último día del periodo que se está bajando.

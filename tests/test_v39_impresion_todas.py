@@ -14,6 +14,7 @@ Nunca se imprime de verdad: todo lo que toca Windows (`_lanzar`, `_imprimir_pdf_
 `_predeterminada`) se sustituye.  Tampoco se usan la base de datos real, el llavero, la red ni tareas de Windows.
 """
 
+import datetime
 import json
 import os
 import shutil
@@ -32,6 +33,7 @@ from test_servidor_ui import BaseApi  # noqa: E402
 from webbot import flujo as mod_flujo  # noqa: E402
 from webbot import impresion  # noqa: E402
 from webbot import servidor_ui as su  # noqa: E402
+from test_integracion import BaseIntegracion  # noqa: E402
 from webbot.flujo import Flujo, Paso  # noqa: E402
 
 def _nunca(*a, **k):
@@ -506,6 +508,186 @@ class TestLoQueHaceLaTareaProgramada(unittest.TestCase):
         falso.assert_called_once()
         self.assertEqual(falso.call_args[0][:2], (ruta, "Impresora Oficina"))
         self.assertEqual([i["archivo"] for i in ej.resultado.impresiones], [ruta])
+
+
+# ============================================================================ v3.9: una carpeta por mes
+class TestNombreDeLaCarpeta(unittest.TestCase):
+    """El nombre lleva primero el año y el mes (para que se ordenen solas) y luego el mes en palabras."""
+
+    def test_cada_modo(self):
+        d = datetime.date
+        self.assertEqual(mod_flujo.carpeta_de_periodo(d(2026, 11, 1), d(2026, 11, 30)), "2026-11 noviembre")
+        self.assertEqual(mod_flujo.carpeta_de_periodo(d(2026, 2, 1), d(2026, 2, 28)), "2026-02 febrero")
+        self.assertEqual(mod_flujo.carpeta_de_periodo(d(2026, 11, 1), d(2026, 11, 15)), "2026-11 noviembre 1a quincena")
+        self.assertEqual(mod_flujo.carpeta_de_periodo(d(2026, 11, 16), d(2026, 11, 30)), "2026-11 noviembre 2a quincena")
+        self.assertEqual(mod_flujo.carpeta_de_periodo(d(2026, 11, 17), d(2026, 11, 17)), "2026-11-17")
+        self.assertEqual(mod_flujo.carpeta_de_periodo(d(2026, 11, 17)), "2026-11-17")
+        self.assertEqual(mod_flujo.carpeta_de_periodo(d(2026, 11, 5), d(2026, 11, 20)), "2026-11 noviembre 05-20")
+        self.assertEqual(mod_flujo.carpeta_de_periodo(d(2026, 10, 1), d(2026, 11, 15)), "2026-10-01 a 2026-11-15")
+        self.assertEqual(mod_flujo.carpeta_de_periodo(d(2026, 11, 30), d(2026, 11, 1)), "2026-11 noviembre")  # al revés
+
+    def test_sin_tildes_ni_caracteres_raros(self):
+        prohibidos = set('<>:"/\\|?*')
+        for mes in range(1, 13):
+            for desde, hasta in ((datetime.date(2026, mes, 1), datetime.date(2026, mes, 28)),
+                                 (datetime.date(2026, mes, 1), datetime.date(2026, mes, 14))):
+                nombre = mod_flujo.carpeta_de_periodo(desde, hasta)
+                self.assertFalse(prohibidos & set(nombre), nombre)
+                self.assertEqual(nombre, nombre.encode("ascii", "ignore").decode("ascii"), nombre)
+
+    def test_la_opcion(self):
+        self.assertFalse(mod_flujo.carpeta_por_periodo({}))
+        self.assertFalse(mod_flujo.carpeta_por_periodo({"carpeta_por_periodo": "si"}))
+        self.assertTrue(mod_flujo.carpeta_por_periodo({"carpeta_por_periodo": True}))
+
+
+class TestCarpetaPorMes(BaseIntegracion):
+    """Los archivos de cada mes (o quincena, o día) caen en su carpeta, también con «para cada opción»."""
+
+    COMERCIOS = ["TIENDA CENTRO 10000000001", "TIENDA NORTE 10000000002", "TIENDA SUR II 10000000003",
+                 "TIENDA PLAYA 10000000004", "TIENDA AEROPUERTO 10000000005"]
+
+    def flujo(self, con_lista=False, carpeta_paso="", periodos=None):
+        url = self.base + "pagos_consulta.html"
+        pasos = [Paso("abrir_url", url=url)]
+        if con_lista:
+            pasos.append(Paso("elegir_opcion", selectores=["#LocationIdlabel"], objetivo="Localidad",
+                              filtro="Localidad", estrategia="cada_una"))
+        pasos += [Paso("escribir", selectores=["#DateFrom"], objetivo="Fecha Desde", valor="{desde:%d/%m/%Y}",
+                       fecha_directa=True),
+                  Paso("escribir", selectores=["#DateTo"], objetivo="Fecha Hasta", valor="{hasta:%d/%m/%Y}",
+                       fecha_directa=True),
+                  Paso("descargar", selectores=["#ExcelButton"], objetivo="Excel", nombre="{reporte}{ext}",
+                       carpeta=carpeta_paso)]
+        f = Flujo(nombre="Pagos del mes", url=url, pasos=pasos)
+        f.opciones.update(timeout_paso=15, timeout_descarga=30, pausa_entre_pasos=0, carpeta_por_periodo=True)
+        if periodos:
+            f.opciones["repetir_dias"] = periodos
+        return f
+
+    def archivos(self, carpeta=None):
+        raiz = carpeta or self.descargas
+        res = []
+        for base, _dirs, ficheros in os.walk(raiz):
+            for f in ficheros:
+                res.append(os.path.relpath(os.path.join(base, f), raiz).replace("\\", "/"))
+        return sorted(res)
+
+    def test_sin_repeticion_usa_las_fechas_del_reporte(self):
+        f = self.flujo()
+        f.pasos[1].valor, f.pasos[2].valor = "01/10/2026", "31/10/2026"
+        r = self.ejecutar(f)
+        log = self.leer_log(r)
+        self.assertTrue(r.ok, log)
+        self.assertEqual(self.archivos(), ["Pagos del mes/2026-10 octubre/Pagos del mes.xls"])
+        self.assertIn("(los archivos de este periodo se guardan en:", log)
+        self.assertIn("los archivos se guardaron en", r.resumen())
+
+    def test_sin_fechas_usa_el_mes_de_hoy(self):
+        f = self.flujo()
+        f.pasos[1].valor = f.pasos[2].valor = ""          # sin fecha: pasos que se saltan
+        r = self.ejecutar(f)
+        self.assertTrue(r.ok, self.leer_log(r))
+        self.assertEqual(self.archivos(), ["Pagos del mes/2026-03 marzo/Pagos del mes.xls"])   # HOY = 15/03/2026
+
+    def test_una_carpeta_por_mes_con_ponerse_al_dia(self):
+        f = self.flujo(periodos={"modo": "meses", "rango": "fijo", "desde": "2026-01-01", "hasta": "2026-02-28"})
+        r = self.ejecutar(f)
+        log = self.leer_log(r)
+        self.assertTrue(r.ok, log)
+        # con una carpeta por mes, los nombres no llevan el periodo (no se pueden pisar)
+        self.assertEqual(self.archivos(), ["Pagos del mes/2026-01 enero/Pagos del mes.xls",
+                                           "Pagos del mes/2026-02 febrero/Pagos del mes.xls"])
+        self.assertEqual(len(r.carpetas), 2)
+        self.assertIn("2 carpetas", r.resumen())
+
+    def test_quincenas_y_dias(self):
+        f = self.flujo(periodos={"modo": "quincenas", "rango": "fijo", "desde": "2026-01-01", "hasta": "2026-01-31",
+                                 "corte": 16, "mitades": "ambas"})
+        r = self.ejecutar(f)
+        self.assertTrue(r.ok, self.leer_log(r))
+        self.assertEqual([a.split("/")[1] for a in self.archivos()],
+                         ["2026-01 enero 1a quincena", "2026-01 enero 2a quincena"])
+        shutil.rmtree(self.descargas, ignore_errors=True)
+        g = self.flujo(periodos={"modo": "fijo", "desde": "2026-01-05", "hasta": "2026-01-06"})
+        g.pasos[1].valor, g.pasos[2].valor = "{fecha:%d/%m/%Y}", "{fecha:%d/%m/%Y}"
+        r = self.ejecutar(g)
+        self.assertTrue(r.ok, self.leer_log(r))
+        self.assertEqual([a.split("/")[1] for a in self.archivos()], ["2026-01-05", "2026-01-06"])
+
+    def test_todas_las_opciones_del_mes_en_la_misma_carpeta(self):
+        f = self.flujo(con_lista=True)
+        f.pasos[2].valor, f.pasos[3].valor = "01/10/2026", "31/10/2026"
+        r = self.ejecutar(f)
+        log = self.leer_log(r)
+        self.assertTrue(r.ok, log)
+        self.assertEqual(self.archivos(),
+                         sorted("Pagos del mes/2026-10 octubre/Pagos del mes - %s.xls" % c for c in self.COMERCIOS))
+        self.assertEqual(len(r.carpetas), 1)
+
+    def test_la_carpeta_del_paso_manda_y_el_mes_va_dentro(self):
+        propia = os.path.join(self.tmp, "PDFs")
+        f = self.flujo(carpeta_paso=propia)
+        f.pasos[1].valor, f.pasos[2].valor = "01/10/2026", "31/10/2026"
+        r = self.ejecutar(f)
+        self.assertTrue(r.ok, self.leer_log(r))
+        self.assertEqual(self.archivos(propia), ["2026-10 octubre/Pagos del mes.xls"])   # sin el nombre del reporte
+        self.assertEqual(self.archivos(), [])
+
+    def test_no_pisa_lo_que_ya_estaba(self):
+        f = self.flujo()
+        f.pasos[1].valor, f.pasos[2].valor = "01/10/2026", "31/10/2026"
+        self.assertTrue(self.ejecutar(f).ok)
+        r = self.ejecutar(f)
+        self.assertTrue(r.ok, self.leer_log(r))
+        self.assertEqual(self.archivos(), ["Pagos del mes/2026-10 octubre/Pagos del mes (2).xls",
+                                           "Pagos del mes/2026-10 octubre/Pagos del mes.xls"])
+
+    def test_sin_la_casilla_todo_sigue_como_antes(self):
+        f = self.flujo()
+        f.opciones.pop("carpeta_por_periodo")
+        f.pasos[1].valor, f.pasos[2].valor = "01/10/2026", "31/10/2026"
+        r = self.ejecutar(f)
+        self.assertTrue(r.ok, self.leer_log(r))
+        self.assertEqual(self.archivos(), ["Pagos del mes.xls"])
+
+
+class TestCarpetaMesEnLaVentana(BaseApi):
+    """La casilla de la ventana «Programar»: se guarda, se ve y «Probar ahora» la usa sin tocar lo guardado."""
+
+    def reporte(self):
+        f = Flujo(nombre="Pagos", url="http://127.0.0.1/", pasos=[
+            Paso("abrir_url", url="http://127.0.0.1/"),
+            Paso("escribir", selectores=["#d"], objetivo="Fecha Desde", valor="01/10/2026", fecha_directa=True),
+            Paso("descargar", selectores=["#b"], objetivo="Excel", nombre="{reporte}{ext}")])
+        return self.alm.guardar(f)
+
+    def test_ver_y_guardar(self):
+        rid = self.reporte()
+        v = self.api("GET", "reportes/%d/cada_mes" % rid)
+        self.assertFalse(v["carpeta"]["activo"])
+        self.assertTrue(v["carpeta"]["ejemplo"].endswith(os.path.join("Pagos", mod_flujo.carpeta_de_periodo(
+            *__import__("webbot.fechas_reporte", fromlist=["x"]).mes_anterior()))), v["carpeta"]["ejemplo"])
+        r = self.api("POST", "reportes/%d/cada_mes" % rid, {"carpeta_mes": True, "imprimir": {"activo": False},
+                                                            "fechas": "no_tocar", "cuando": {"modo": "no"}})
+        self.assertIn("cada mes en su propia carpeta", r["cambios"])
+        self.assertTrue(self.alm.cargar_flujo(rid).opciones["carpeta_por_periodo"])
+        self.assertTrue(self.api("GET", "reportes/%d/cada_mes" % rid)["carpeta"]["activo"])
+        # y se puede quitar
+        r = self.api("POST", "reportes/%d/cada_mes" % rid, {"carpeta_mes": False, "imprimir": {"activo": False},
+                                                            "fechas": "no_tocar", "cuando": {"modo": "no"}})
+        self.assertIn("todo en la misma carpeta (sin carpeta por mes)", r["cambios"])
+        self.assertNotIn("carpeta_por_periodo", self.alm.cargar_flujo(rid).opciones)
+
+    def test_probar_ahora_la_usa_sin_guardarla(self):
+        rid = self.reporte()
+        antes = self.alm.cargar_flujo(rid).a_json()
+        lanzados = []
+        self.app._lanzar_uno = lambda fl, r, ver, lento, variables, descripcion=None: lanzados.append(fl) or su.Trabajo("ejecutar", "")
+        self.api("POST", "reportes/%d/cada_mes" % rid, {"probar": True, "carpeta_mes": True, "fechas": "no_tocar",
+                                                        "imprimir": {"activo": False}})
+        self.assertTrue(lanzados[0].opciones["carpeta_por_periodo"])
+        self.assertEqual(self.alm.cargar_flujo(rid).a_json(), antes)
 
 
 if __name__ == "__main__":
