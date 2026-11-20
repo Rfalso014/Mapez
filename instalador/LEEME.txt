@@ -37,6 +37,9 @@ Cómo instalarlo (lo que hace la otra persona)
       [7/7] Comprobando que todo funciona...
 4. Al final dice «¡Listo!» y pregunta «¿Abrir Bot Web ahora? (S/N)».
 5. Desde entonces se abre con el icono «Bot Web» del Escritorio o del menú Inicio.
+   Se abre SIN ventana negra (4.0).  Si se quiere abrir desde la carpeta del programa, el archivo
+   es «Bot Web.vbs».  Para VER los mensajes cuando algo falla: «iniciar.bat» (esa sí abre ventana).
+   Los mensajes quedan siempre en la carpeta «registros» (consola.log y arranque.log).
 
 El bot queda en la carpeta  C:\Users\<usuario>\BotWeb\app
 Lo que descarga va a        C:\Users\<usuario>\BotWeb\app\descargas

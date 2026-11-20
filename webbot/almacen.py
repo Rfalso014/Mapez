@@ -366,6 +366,37 @@ CREATE TABLE ejecuciones_v32 (
     pagina_id INTEGER
 )"""
 
+# v4.0 «puente de errores»: los fallos de ESTE equipo que faltan por mandar al equipo central (`errores_salida`,
+# la cola de salida) y los que han llegado de otros equipos (`errores_recibidos`, la bandeja del equipo central).
+# `uuid` es único en la bandeja: si un equipo manda dos veces el mismo fallo (porque no le llegó el «recibido»),
+# se guarda UNA sola vez.  En la cola de salida se guarda el cuerpo ya limpio (sin nada delicado): ver `webbot/puente.py`.
+ESQUEMA_ERRORES = """
+CREATE TABLE IF NOT EXISTS errores_salida (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    uuid TEXT NOT NULL UNIQUE,
+    cuando TEXT NOT NULL,
+    cuerpo TEXT NOT NULL,
+    intentos INTEGER NOT NULL DEFAULT 0,
+    ultimo TEXT NOT NULL DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS errores_recibidos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    uuid TEXT NOT NULL UNIQUE,
+    equipo TEXT NOT NULL DEFAULT '',
+    reporte TEXT NOT NULL DEFAULT '',
+    cuando TEXT NOT NULL DEFAULT '',
+    recibido TEXT NOT NULL,
+    paso TEXT NOT NULL DEFAULT '',
+    mensaje TEXT NOT NULL DEFAULT '',
+    registro TEXT NOT NULL DEFAULT '',
+    version TEXT NOT NULL DEFAULT '',
+    leido INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS errores_recibidos_por_fecha ON errores_recibidos(recibido DESC);
+"""
+MAX_ERRORES_RECIBIDOS = 500       # la bandeja guarda como mucho estos (se borran los más viejos)
+MAX_ERRORES_COLA = 200            # la cola de salida de un equipo (si no se pueden mandar, se tiran los más viejos)
+
 AJUSTES_DEFECTO = {
     "navegador": "chrome",
     "timeout_paso": 60,
@@ -376,6 +407,11 @@ AJUSTES_DEFECTO = {
     "esperar_carga": True,
     "ver_mientras_trabaja": True,
     "guia_vista": False,          # v3.8: la guía de inicio ya se vio o se saltó
+    # v4.0 «puente de errores».  Las CLAVES no están aquí a propósito: viven en `meta` y no salen por /api/ajustes.
+    "recibir_errores": False,     # este equipo es el central y escucha los fallos de los demás (apagado de fábrica)
+    "recibir_puerto": 8765,
+    "enviar_errores_a": "",       # en los demás equipos: «http://192.168.1.50:8765»
+    "nombre_equipo": "",          # cómo se llama este equipo en la lista («Caja 2»)
 }
 
 
@@ -418,6 +454,8 @@ def _url_de(flujo):
 
 
 class Almacen:
+    al_registrar = None            # v4.0: gancho «una ejecución acabó mal» (lo pone webbot/puente.enganchar)
+
     def __init__(self, ruta=None):
         self.ruta = os.path.abspath(ruta or ruta_por_defecto())
         os.makedirs(os.path.dirname(self.ruta), exist_ok=True)
@@ -451,6 +489,7 @@ class Almacen:
                 con.execute("ALTER TABLE ejecuciones ADD COLUMN correo_id INTEGER")
             con.execute("CREATE INDEX IF NOT EXISTS ejecuciones_por_correo ON ejecuciones(correo_id, id)")
             con.executescript(ESQUEMA_EN_CURSO)              # v3.7: tabla nueva (no cambia nada de lo anterior)
+            con.executescript(ESQUEMA_ERRORES)               # v4.0: tablas nuevas (no cambian nada de lo anterior)
 
     def _tablas(self, con):
         return {f[0] for f in con.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
@@ -780,7 +819,23 @@ class Almacen:
             c.execute("DELETE FROM ejecuciones WHERE {0} = ? AND id NOT IN "
                       "(SELECT id FROM ejecuciones WHERE {0} = ? ORDER BY id DESC LIMIT ?)".format(columna),
                       (clave, clave, MAX_HISTORIAL_POR_REPORTE))
+        if resultado != "ok":
+            self._avisar_fallo(tabla, clave, mensaje, registro)
         return True
+
+    def _avisar_fallo(self, tabla, clave, mensaje, registro):
+        """v4.0: una ejecución ha acabado mal.  Si alguien enganchó `al_registrar` (el puente de errores lo hace al
+        arrancar), se le cuenta: es el ÚNICO sitio por el que pasan todos los fallos (reportes, Páginas y correo).
+        Nunca lanza excepciones: un aviso que falla no debe tumbar una ejecución."""
+        gancho = getattr(self, "al_registrar", None)
+        if gancho is None:
+            return
+        try:
+            f = self._con().execute("SELECT nombre FROM %s WHERE id = ?" % tabla, (clave,)).fetchone()
+            gancho({"nombre": (f["nombre"] if f is not None else "") or "", "mensaje": mensaje or "",
+                    "registro": registro or "", "cuando": _ahora()})
+        except Exception:              # noqa: BLE001
+            pass
 
     def registrar_resultado(self, reporte_id, res):
         """Anota un ResultadoEjecucion del ejecutor."""
@@ -1134,6 +1189,101 @@ class Almacen:
         with self._transaccion() as c:
             c.execute("INSERT OR REPLACE INTO meta(clave, valor) VALUES ('ajustes', ?)", (json.dumps(d, ensure_ascii=False),))
         return d
+
+    # ------------------------------------------------- v4.0: claves del puente de errores
+    def clave(self, nombre):
+        """Una clave del puente («recibir» o «enviar»), guardada en `meta` y NUNCA en los ajustes (así no sale por
+        /api/ajustes ni en una copia de los ajustes).  Devuelve «» si no hay."""
+        f = self._con().execute("SELECT valor FROM meta WHERE clave = ?", ("clave_" + str(nombre),)).fetchone()
+        return (f["valor"] or "") if f is not None else ""
+
+    def guardar_clave(self, nombre, valor):
+        with self._transaccion() as c:
+            c.execute("INSERT OR REPLACE INTO meta(clave, valor) VALUES (?, ?)",
+                      ("clave_" + str(nombre), str(valor or "")))
+        return str(valor or "")
+
+    # ------------------------------------------------- v4.0: cola de salida de errores
+    def encolar_error(self, uuid, cuerpo, cuando=None):
+        """Guarda un fallo de ESTE equipo para mandarlo al central cuando se pueda.  Si ya estaba (mismo uuid), no
+        lo repite.  Devuelve el id de la fila (o 0 si ya estaba)."""
+        with self._transaccion() as c:
+            if c.execute("SELECT 1 FROM errores_salida WHERE uuid = ?", (str(uuid),)).fetchone() is not None:
+                return 0
+            cur = c.execute("INSERT INTO errores_salida(uuid, cuando, cuerpo) VALUES (?, ?, ?)",
+                            (str(uuid), _ahora(cuando), cuerpo if isinstance(cuerpo, str)
+                             else json.dumps(cuerpo, ensure_ascii=False)))
+            c.execute("DELETE FROM errores_salida WHERE id NOT IN "
+                      "(SELECT id FROM errores_salida ORDER BY id DESC LIMIT ?)", (MAX_ERRORES_COLA,))
+            return int(cur.lastrowid)
+
+    def errores_en_cola(self, limite=50):
+        """Lo que falta por mandar, los más viejos primero: dicts {id, uuid, cuando, cuerpo, intentos, ultimo}."""
+        filas = self._con().execute("SELECT * FROM errores_salida ORDER BY id LIMIT ?", (int(limite),)).fetchall()
+        res = []
+        for f in filas:
+            d = dict(f)
+            try:
+                d["cuerpo"] = json.loads(d.get("cuerpo") or "{}")
+            except ValueError:
+                d["cuerpo"] = {}
+            res.append(d)
+        return res
+
+    def quitar_error_de_cola(self, fila_id):
+        with self._transaccion() as c:
+            c.execute("DELETE FROM errores_salida WHERE id = ?", (int(fila_id),))
+        return True
+
+    def fallo_envio_error(self, fila_id, motivo=""):
+        """Un intento que no salió bien (el equipo central estaba apagado): se queda en la cola."""
+        with self._transaccion() as c:
+            c.execute("UPDATE errores_salida SET intentos = intentos + 1, ultimo = ? WHERE id = ?",
+                      ((motivo or "")[:200], int(fila_id)))
+        return True
+
+    # ------------------------------------------------- v4.0: bandeja del equipo central
+    def guardar_error_recibido(self, datos):
+        """Anota un fallo que ha llegado de otro equipo.  Devuelve el id, o 0 si ya estaba (mismo uuid: nada se
+        guarda dos veces)."""
+        d = dict(datos or {})
+        with self._transaccion() as c:
+            if c.execute("SELECT 1 FROM errores_recibidos WHERE uuid = ?", (str(d.get("uuid") or ""),)).fetchone():
+                return 0
+            cur = c.execute("INSERT INTO errores_recibidos(uuid, equipo, reporte, cuando, recibido, paso, mensaje, "
+                            "registro, version) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                            (str(d.get("uuid") or ""), str(d.get("equipo") or "")[:60],
+                             str(d.get("reporte") or "")[:LARGO_MAX_NOMBRE], str(d.get("cuando") or "")[:40],
+                             _ahora(), str(d.get("paso") or "")[:300], str(d.get("mensaje") or "")[:1000],
+                             str(d.get("registro") or ""), str(d.get("version") or "")[:20]))
+            c.execute("DELETE FROM errores_recibidos WHERE id NOT IN "
+                      "(SELECT id FROM errores_recibidos ORDER BY id DESC LIMIT ?)", (MAX_ERRORES_RECIBIDOS,))
+            return int(cur.lastrowid)
+
+    def errores_recibidos(self, limite=100, solo_no_leidos=False, con_registro=False):
+        """Los fallos que han llegado, el más reciente primero."""
+        campos = "*" if con_registro else ("id, uuid, equipo, reporte, cuando, recibido, paso, mensaje, version, leido,"
+                                           " LENGTH(registro) AS largo_registro")
+        sql = "SELECT %s FROM errores_recibidos %s ORDER BY id DESC LIMIT ?" % (
+            campos, "WHERE leido = 0" if solo_no_leidos else "")
+        return [dict(f) for f in self._con().execute(sql, (int(limite),)).fetchall()]
+
+    def error_recibido(self, eid):
+        f = self._con().execute("SELECT * FROM errores_recibidos WHERE id = ?", (int(eid),)).fetchone()
+        return dict(f) if f is not None else None
+
+    def marcar_error_recibido(self, eid, leido=True):
+        with self._transaccion() as c:
+            c.execute("UPDATE errores_recibidos SET leido = ? WHERE id = ?", (1 if leido else 0, int(eid)))
+        return True
+
+    def errores_sin_leer(self):
+        return self._con().execute("SELECT COUNT(*) FROM errores_recibidos WHERE leido = 0").fetchone()[0]
+
+    def borrar_errores_recibidos(self):
+        with self._transaccion() as c:
+            c.execute("DELETE FROM errores_recibidos")
+        return True
 
     # ----------------------------------------------------------- v3.3: vigilancias (varias)
     def _fila_vigilancia(self, f):

@@ -17,3 +17,7 @@ __pycache__/
 
 # Paquete para compartir (se crea con instalador/crear_paquete.py)
 paquete/
+
+# Cosas de la computadora, no del programa
+.claude/
+instalador/*.rar

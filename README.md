@@ -1,8 +1,20 @@
-# Bot Web — descarga automática de reportes (versión 3.9)
+# Bot Web — descarga automática de reportes (versión 4.0)
 
 El bot **abre una página web, repite los pasos que tú le enseñes y descarga el reporte**, sin
 que tengas que estar delante. Puedes verlo trabajar o dejarlo **oculto**, y programarlo para que
 se ejecute solo a una hora. Puedes tener **varios reportes** guardados y ejecutarlos juntos.
+
+**Novedades de la 4.0** (detalles en §28)
+
+* **Los errores de las otras computadoras llegan a esta** (§28.1): si usas Bot Web en varias computadoras de la misma
+  red, enciende en la principal **«Recibir los errores de otras computadoras»** (Ajustes) y escribe en las demás su
+  dirección y su clave. Lo que falle allí se ve aquí, en **Historial › Errores de otras computadoras**, con un número
+  rojo sobre «Historial» cuando llega algo nuevo. Si la principal está apagada, **nada se pierde**: se guarda y se
+  manda cuando vuelve. Nunca se mandan contraseñas ni usuarios.
+* **Se acabó la ventana negra** (§28.2): ahora se abre con **«Bot Web.vbs»** (o con el acceso directo del escritorio)
+  y no aparece ninguna consola. Para **ver los mensajes** cuando algo falla, abre **«iniciar.bat»** como siempre.
+* **Logotipo propio** (§28.3): Bot Web ya tiene su dibujo (la flecha que baja), en la esquina de la ventana, en la
+  pestaña del navegador y en el acceso directo.
 
 **Novedades de la 3.9** (detalles en §27)
 
@@ -23,7 +35,9 @@ se ejecute solo a una hora. Puedes tener **varios reportes** guardados y ejecuta
 * **El bot se actualiza solo** (§27.5): aviso **«Hay una nueva actualización»** con botón **Actualizar**.
 * **Mejor con las webs de verdad** (§27.6): rellena los **calendarios de la página** por dentro y **comprueba** que la
   fecha quedó puesta; guarda los **PDF que se abren en otra pestaña**; el mapeo encuentra las **listas propias** (un
-  recuadro con la lista escondida, como «Localidad»); la ventana **nunca se va de lado** (sin barra horizontal).
+  recuadro con la lista escondida, como «Localidad»); no **cierra** los menús de la izquierda que la web ya abrió
+  (antes el reporte se quedaba dando vueltas en otros ordenadores); la ventana **nunca se va de lado** (sin barra
+  horizontal).
 
 **Novedades de la 3.7 y la 3.8** (detalles en §25 y §26)
 
@@ -842,7 +856,7 @@ crean tareas programadas ni usan el ratón o teclado reales (el «ratón» es el
 `tests/test_gui.py` y `tests/test_gui_v23.py` ejercitan el panel Reportes, guardar/renombrar/papelera,
 la lista de pasos, la pregunta «la página pide iniciar sesión» (hilo de trabajo ↔ ventana), los
 cuadros Accesos y Versiones y la actualización de reportes al abrir, sin interacción humana. En total
-unas **736 pruebas** (3.9); tardan unos **25 minutos**. Ninguna muestra notificaciones de Windows (el notificador es
+unas **804 pruebas** (4.0); tardan unos **27 minutos**. Ninguna muestra notificaciones de Windows (el notificador es
 inyectable y no hace nada mientras se ejecuta `unittest`).
 Las pruebas de la versión 1: `cd version_escritorio` y `python -m unittest discover -s tests`.
 
@@ -1913,6 +1927,15 @@ Notas:
   normal — un recuadro que se pulsa y enseña una lista escondida de filas (como «Localidad» en el portal de Pagos) — con
   su nombre y sus opciones (sin el buscador ni el título del grupo). Al traerla puedes elegir **«todas, una tras otra»**
   o **«las que marque»**, y hay un botón **⬇ Descargar todas** para probarlo ahí mismo.
+* **Menús de la izquierda que se abren y se cierran**: en muchas webs el menú lateral es un acordeón (pulsas
+  «Consultas» y se despliega su lista; lo pulsas otra vez y se cierra). Si grabaste el reporte con ese menú cerrado
+  pero en **otro ordenador** la web lo abre sola, ese clic lo **cerraba** y el reporte se quedaba dando vueltas. Ahora
+  el bot mira antes si lo que necesita el paso siguiente **ya se ve**: si sí, **se salta ese clic** y lo dice en el
+  registro («…ya está abierto…: se salta este clic para no cerrarlo»). No tienes que cambiar nada en tus reportes.
+* **Dos cosas con el mismo nombre**: cuando el mismo texto está en el menú de la izquierda **y** en una pestaña de la
+  página, el bot se queda con el que corresponde al paso (el del menú o el del cuerpo) y anota en el registro con
+  cuál se quedó. Y si algo no aparece nunca, el paso **falla con un aviso claro** que dice qué estaba esperando, en
+  vez de intentarlo sin parar.
 * **Lista de descargas en vivo**: mientras baja muchas cosas, el bot enseña «Se van a bajar 17 × 2 = 34 archivos» y cada
   archivo va pasando por **esperando → bajando → listo** (y «impreso», si imprime).
 * **La ventana nunca se va de lado**: no hay barra de desplazamiento horizontal ni en una pantalla pequeña; los nombres
@@ -1940,5 +1963,129 @@ Pruebas: `tests/test_v39_pagos.py` (calendarios de la web, PDF en otra pestaña,
 lista propia, con un sitio de prueba nuevo `tests/sitio_prueba/pagos_consulta.html`),
 `tests/test_v39_impresion_todas.py` (impresión con impresoras falsas, «Descargar todas» y la ventana «Programar»),
 `tests/test_v39_periodos.py`, `tests/test_v39_fechas_impresion.py`, `tests/test_v39_interfaz.py`,
-`tests/test_v39_actualizar.py` y `tests/test_integracion_v39.py`. Nunca se imprime de verdad, ni se tocan la base de
+`tests/test_v39_actualizar.py`, `tests/test_integracion_v39.py` y `tests/test_v39_menu.py` (el menú lateral que ya
+está abierto y el nombre repetido en el menú y en una pestaña, con el sitio de prueba
+`tests/sitio_prueba/pagos_menu.html`). Nunca se imprime de verdad, ni se tocan la base de
 datos real, el llavero, la red ni el Programador de tareas.
+
+
+## 28. Novedades de la 4.0: los errores de las otras computadoras, sin ventana negra y logotipo
+
+### 28.1 Ver aquí lo que falla en las otras computadoras
+
+Si tienes Bot Web en varias computadoras (la de la oficina, la de la caja…), hasta ahora tenías que ir a cada una para
+saber si algo había fallado. Ahora **una de ellas manda y otra recibe**.
+
+**En la computadora principal** (la que quieres mirar), ve a **Ajustes › Errores de otras computadoras** y enciende
+**«Recibir los errores de otras computadoras»**. Aparecerán dos cosas para copiar:
+
+* la **dirección** (algo como `http://192.168.1.50:8765`), y
+* la **clave** (algo como `K7MP-3QTD-WXYZ-5RHN`).
+
+Hay un botón para copiar cada una y otro, **«Clave nueva»**, por si quieres cambiarla (ojo: entonces hay que escribir
+la nueva en las demás computadoras).
+
+**En las otras computadoras**, en esa misma pantalla, rellena abajo:
+
+* **«Enviar mis errores a»**: la dirección que enseña la principal;
+* **«Clave»**: la clave que enseña la principal;
+* **«Nombre de esta computadora»**: cómo quieres verla en la lista («Caja 2», «Oficina»…).
+
+Pulsa **Guardar** y después **«Probar el envío»**: te dice en el momento si funciona o por qué no (la dirección está
+mal, la clave no coincide, la principal está apagada…).
+
+**Dónde se ven.** En la computadora principal, en **Historial**, encima de las ejecuciones de siempre, hay una tarjeta
+**«Errores de otras computadoras»** con lo último primero: el reporte, de qué computadora viene, cuándo llegó, el paso
+que falló y el mensaje. Al pulsar uno se abre con el **final de su registro**. Mientras haya errores sin ver, sale un
+**número rojo** al lado de «Historial» (y también salta un aviso de Windows). Hay botones para **marcar todo como
+visto** y para **vaciar la lista** (eso no toca nada de los reportes ni del historial de esta computadora).
+
+**Si la principal está apagada no se pierde nada.** La computadora que falla guarda el aviso y lo vuelve a intentar
+cada pocos minutos, y en cuanto puede lo manda. Si se manda dos veces el mismo (porque no llegó la respuesta), en la
+lista aparece **una sola vez**.
+
+**Qué se manda exactamente**: el nombre que le pusiste a esa computadora, el nombre del reporte, la fecha y la hora, el
+paso que falló, el mensaje del error, la versión de Bot Web y el **final del registro** de esa ejecución. También se
+avisa si se cae **el programa entero**, no solo un reporte.
+
+**Qué NO se manda, nunca**: contraseñas, usuarios, lo que haya en el Administrador de credenciales, las cookies o el
+perfil del navegador, ni los archivos descargados. Además, antes de salir de la computadora se **tacha** del texto, por
+si acaso: los datos de acceso de los pasos «Iniciar sesión», lo que escriben los pasos «Escribir», todo lo que vaya
+detrás de «usuario», «contraseña», «clave», «token» o «cookie», las direcciones de correo, los parámetros de las
+direcciones web, el nombre de tu cuenta de Windows en las rutas y los números largos (de los que solo queda el final,
+como «••••1234»).
+
+**Y es seguro:**
+
+* **Viene apagado de fábrica.** Mientras no lo enciendas, Bot Web **no abre ningún puerto** a la red.
+* Al encenderlo escucha **solo en la red local** (una dirección 192.168.x.x, 10.x.x.x o 172.16–31.x.x). **Nunca**
+  escucha en «todas las tarjetas de red» (0.0.0.0) ni en Internet. Si la computadora no está en una red local, no se
+  enciende y te lo dice.
+* Hace falta la **clave**, y se rechaza lo que venga de fuera de la red local. Lo rechazado queda apuntado en el
+  registro con la hora y de dónde vino, pero **la clave nunca se escribe** en ningún registro.
+* Por ese puente **solo se puede mandar un error**: no se pueden ejecutar reportes, ni leer archivos, ni consultar
+  nada. Cualquier otra cosa recibe un «no existe».
+* Hay un **tamaño máximo** por error y un máximo de errores guardados (los más viejos se van).
+* Si tu red tiene cortafuegos, la primera vez Windows puede preguntar si permites que Bot Web reciba datos: di que sí
+  **solo para redes privadas**.
+
+Todo esto se guarda en la base de datos del bot, así que **sigue puesto después de actualizar**.
+
+### 28.2 Se acabó la ventana negra
+
+Antes, al abrir Bot Web aparecía una ventana negra (la consola) que se quedaba ahí todo el rato. Ya no:
+
+* **Para abrirlo normal**: doble clic en **«Bot Web.vbs»** (en la carpeta del programa) o en el **acceso directo**
+  «Bot Web» del escritorio o del menú Inicio, si lo instalaste con el instalador. No se ve ninguna ventana negra.
+* **Para ver los mensajes** (cuando algo no va y quieres mirar qué dice): doble clic en **«iniciar.bat»**, que es
+  exactamente lo de antes, con su ventana y sus mensajes.
+
+Los mensajes **no se pierden** aunque no se vean: quedan en **`registros\consola.log`** (y lo del arranque, en
+`registros\arranque.log`). Esos archivos no crecen sin fin: al llegar a 2 MB se guardan aparte con el nombre
+terminado en `.1` y se empieza otro.
+
+Las **tareas programadas** de Windows ya se ejecutaban sin ventana y siguen igual.
+
+### 28.3 Un logotipo para Bot Web
+
+Donde antes había una «B» en un círculo rojo, ahora está el logotipo: una **flecha que baja hacia una línea**, que es
+justo lo que hace el programa. Es plano (sin degradados), se lee bien hasta a 16 píxeles y se usa en tres sitios: la
+esquina de la ventana, la **pestaña del navegador** y el **icono del acceso directo**.
+
+Se dibujaron tres opciones y se dejó la primera puesta; las otras dos siguen en la carpeta `ui/` por si prefieres
+alguna:
+
+| Archivo | Qué es |
+|---|---|
+| `ui/logo-descarga.svg` | **La puesta.** La flecha que baja hacia una línea: «baja el reporte». |
+| `ui/logo-ventana.svg` | Una ventana de navegador con la flecha de bajar dentro. |
+| `ui/logo-repetir.svg` | La flecha que da la vuelta: «repite tus pasos». |
+
+Para cambiarlo, copia la que quieras encima de **`ui/logo.svg`** y vuelve a abrir el programa. El icono del acceso
+directo es **`ui/bot-web.ico`** (se hizo a partir de la opción puesta; el instalador lo coge solo).
+
+### 28.4 Para los que programan
+
+* `webbot/puente.py` (nuevo): todo el puente de errores. `ocultar()` (lo que se tacha), `armar()` (lo que se manda),
+  `Receptor` (el servidor del equipo central: solo `POST /api/errores` y `GET /api/errores/salud`, con clave, tamaño
+  máximo y solo direcciones privadas), `enviar` / `vaciar_cola` / `anotar_fallo` (la cola de salida), `enganchar()`
+  (el único enchufe: `Almacen.registrar_ejecucion` avisa de toda ejecución que acaba mal) y `Reenviador` (reintenta
+  cada 2 minutos).
+* `webbot/almacen.py`: tablas `errores_salida` (la cola de este equipo) y `errores_recibidos` (la bandeja, con `uuid`
+  único para que nada se guarde dos veces), `clave()` / `guardar_clave()` (las claves van en `meta`, **no** en los
+  ajustes, para que no salgan por `/api/ajustes`) y los ajustes `recibir_errores`, `recibir_puerto`,
+  `enviar_errores_a` y `nombre_equipo`.
+* `webbot/servidor_ui.py`: `/api/errores` (ver, encender, clave nueva, a dónde mandar, probar, marcar visto, vaciar) y
+  `errores_otros` en `/api/estado`. El servidor de la interfaz sigue escuchando **solo en 127.0.0.1**: el puente es
+  otro servidor distinto, con sus propias reglas.
+* `webbot/consola.py` (nuevo): `preparar()` manda `print` y los errores a `registros/consola.log` cuando no hay
+  consola (pythonw). `bot.py`: `principal_protegido()` cuenta (y manda) lo que pase si el programa se cae.
+* `Bot Web.vbs` + `iniciar_oculto.cmd` (nuevos): el arranque sin consola; `iniciar.bat` se queda como «ver los
+  mensajes».
+* `ui/logo*.svg` y `ui/bot-web.ico`: el logotipo.
+
+Pruebas: `tests/test_v40_puente.py` (lo que se tacha, la cola cuando la principal está apagada, el mismo error dos
+veces, la clave que no coincide, el tamaño máximo, que por el puente no se pueda hacer nada más, la API, las dos
+pantallas en un navegador oculto, el arranque sin consola y el logotipo). El receptor de las pruebas escucha en
+127.0.0.1: **ninguna prueba sale a la red**, ni toca la base de datos real, el llavero, las tareas de Windows o una
+impresora.

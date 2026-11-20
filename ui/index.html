@@ -5,14 +5,14 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light">
 <title>Bot Web</title>
-<link rel="icon" href="data:,">
+<link rel="icon" href="logo.svg" type="image/svg+xml">
 <link rel="stylesheet" href="tema.css">
 <link rel="stylesheet" href="app.css">
 </head>
 <body>
 <div class="app">
   <header class="barra-sup">
-    <a class="logo" href="#/inicio" aria-label="Bot Web: ir a Inicio">B</a>
+    <a class="logo" href="#/inicio" aria-label="Bot Web: ir a Inicio"><img src="logo.svg" alt="" width="40" height="40"></a>
     <nav class="riel" aria-label="Secciones">
       <div id="menu">
         <div class="riel-grupo">
@@ -20,7 +20,7 @@
           <a href="#/reportes" data-ruta="reportes" data-ico="reportes" aria-label="Reportes"><span class="txt">Reportes</span></a>
           <a href="#/vigilancia" data-ruta="vigilancia" data-ico="vigilancia" aria-label="Vigilancia"><span class="txt">Vigilancia</span></a>
           <a href="#/correo" data-ruta="correo" data-ico="correo" aria-label="Correo"><span class="txt">Correo</span></a>
-          <a href="#/historial" data-ruta="historial" data-ico="historial" aria-label="Historial"><span class="txt">Historial</span></a>
+          <a href="#/historial" data-ruta="historial" data-ico="historial" aria-label="Historial"><span class="txt">Historial</span><span class="cuenta-riel oculto" id="cuenta-errores"></span></a>
           <a href="#/ajustes" data-ruta="ajustes" data-ico="ajustes" aria-label="Ajustes"><span class="txt">Ajustes</span></a>
           <button type="button" id="riel-mas" class="riel-boton" aria-label="Más secciones" aria-expanded="false" aria-controls="riel-sec" data-ico="menu"></button>
         </div>

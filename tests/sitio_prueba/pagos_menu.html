@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Pagos - Consultas (prueba v3.9)</title>
+<style>
+  body { font-family: Segoe UI, Arial, sans-serif; margin: 0; display: flex; min-height: 100vh; }
+  .lateral { width: 220px; background: #f2f4f7; border-right: 1px solid #d7dbe0; padding: 12px; }
+  .lateral h3 { font-size: 14px; margin: 0 0 8px; }
+  .lateral .grupo > a.cabecera { display: block; font-weight: 600; cursor: pointer; padding: 6px 4px; color: #123; }
+  .lateral .grupo ul { list-style: none; margin: 0 0 8px; padding: 0 0 0 12px; }
+  .lateral .grupo ul li a { display: block; padding: 4px; color: #1565c0; text-decoration: none; }
+  .lateral .grupo.cerrado ul { display: none; }
+  .cuerpo { flex: 1; padding: 20px; }
+  .pestanas { list-style: none; display: flex; gap: 6px; margin: 0 0 16px; padding: 0; border-bottom: 2px solid #d7dbe0; }
+  .pestanas li a { display: block; padding: 8px 14px; color: #333; text-decoration: none; border: 1px solid #d7dbe0; border-bottom: 0; }
+  .pestanas li a.activa { background: #fff; font-weight: 600; }
+  .oculto { display: none; }
+</style>
+</head>
+<body>
+<!--
+  v3.9: la misma web de Pagos, pero con el MENÚ LATERAL que tiene el portal real.  Sirve para dos cosas:
+
+  1) El menú lateral es un acordeón: «Consultas» ABRE y CIERRA su lista.  Con «?menu=abierto» la página ya empieza con
+     el grupo abierto (eso pasa en otros equipos: otro tamaño de ventana o el navegador recuerda cómo estaba).  Un
+     reporte grabado con el menú cerrado hace «clic en Consultas» y, si ya estaba abierto, lo CERRABA: el paso
+     siguiente («Comprobante Fiscal») ya no se veía y el bot se quedaba dando vueltas.
+  2) El texto «Comprobante Fiscal» está DOS veces: el enlace del menú lateral y una pestaña en el cuerpo de la
+     página.  Un paso grabado sobre uno no debe pulsar el otro.
+
+  Nombres inventados.
+-->
+  <nav class="lateral" aria-label="Menú">
+    <h3>Mi Empresa</h3>
+    <div class="grupo cerrado" id="grupoConsultas">
+      <a class="cabecera" id="menuConsultas" href="#" role="button" aria-expanded="false" aria-controls="listaConsultas">Consultas</a>
+      <ul id="listaConsultas">
+        <li><a id="Statements_NCF" href="#ncf">Comprobante Fiscal</a></li>
+        <li><a id="Statements_MOV" href="#mov">Movimientos</a></li>
+      </ul>
+    </div>
+    <div class="grupo cerrado" id="grupoAyuda">
+      <a class="cabecera" id="menuAyuda" href="#" role="button" aria-expanded="false" aria-controls="listaAyuda">Ayuda</a>
+      <ul id="listaAyuda"><li><a id="Ayuda_Guia" href="#guia">Guía</a></li></ul>
+    </div>
+  </nav>
+
+  <main class="cuerpo">
+    <h1>Consultas</h1>
+    <ul class="pestanas">
+      <li><a href="#resumen" id="tabResumen" class="activa">Resumen</a></li>
+      <li><a href="#ncf" id="tabNCF">Comprobante Fiscal</a></li>
+    </ul>
+    <p id="donde">Estás en: Resumen</p>
+    <div id="formulario" class="oculto">
+      <p><label for="Fecha">Fecha</label> <input type="text" id="Fecha" name="Fecha" value="01/10/2026"></p>
+      <p><input type="button" value="Excel" id="ExcelButton" class="blue download"></p>
+    </div>
+  </main>
+
+<script>
+(function () {
+  // El menú lateral: cada «cabecera» abre y cierra su grupo (acordeón de toda la vida)
+  const abierto = new URLSearchParams(location.search).get('menu') === 'abierto';
+  for (const cab of document.querySelectorAll('.lateral .cabecera')) {
+    const grupo = cab.parentElement;
+    const poner = (si) => {
+      grupo.classList.toggle('cerrado', !si);
+      cab.setAttribute('aria-expanded', si ? 'true' : 'false');
+    };
+    if (abierto && grupo.id === 'grupoConsultas') poner(true);
+    cab.addEventListener('click', (e) => {
+      e.preventDefault();
+      poner(grupo.classList.contains('cerrado'));
+    });
+  }
+  // Tanto el enlace del menú como la pestaña del cuerpo llevan a «Comprobante Fiscal», pero se nota cuál se pulsó
+  const ir = (desde) => {
+    document.getElementById('donde').textContent = 'Estás en: Comprobante Fiscal (desde ' + desde + ')';
+    document.getElementById('formulario').classList.remove('oculto');
+    document.getElementById('tabNCF').classList.add('activa');
+    document.getElementById('tabResumen').classList.remove('activa');
+  };
+  document.getElementById('Statements_NCF').addEventListener('click', (e) => { e.preventDefault(); ir('el menú'); });
+  document.getElementById('tabNCF').addEventListener('click', (e) => { e.preventDefault(); ir('la pestaña'); });
+  document.getElementById('ExcelButton').addEventListener('click', () => {
+    location.href = '/api/pagos/excel?' + new URLSearchParams({ DateFrom: document.getElementById('Fecha').value });
+  });
+})();
+</script>
+</body>
+</html>

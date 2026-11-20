@@ -100,7 +100,7 @@ class TestSeguridad(BaseApi):
         self.assertEqual(codigo, 401)
         codigo, r = self.llamar("GET", "api/estado")
         self.assertEqual(codigo, 200)
-        self.assertEqual(r["version"], "3.9")
+        self.assertEqual(r["version"], "4.0")
         codigo, _ = self.llamar("GET", "api/estado", cabeceras={"Origin": "http://evil.example.com"})
         self.assertEqual(codigo, 403)
         codigo, _ = self.llamar("GET", "api/estado", cabeceras={"Host": "evil.example.com"})

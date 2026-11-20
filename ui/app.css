@@ -31,9 +31,12 @@ code { font-family: var(--f-mono); font-size: 12px; }
 .app { min-height: 100vh; display: flex; flex-direction: column; }
 .barra-sup { position: sticky; top: 0; z-index: 20; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px;
          padding: 10px max(16px, 2.2vw); background: var(--papel); border-bottom: 2px solid var(--tinta); }
-.logo { flex: 0 0 40px; width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center; background: var(--marca);
-        color: var(--sobre-marca); font: 800 21px var(--f-titulo); text-decoration: none; }
-.logo:hover { background: var(--marca-2); text-decoration: none; }
+/* v4.0: el logotipo es ui/logo.svg (una copia de la opcion elegida: ver ui/logo-*.svg).  El propio dibujo trae su
+   circulo, asi vale igual para la pestana del navegador (favicon) y para el icono del acceso directo. */
+.logo { flex: 0 0 40px; width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center;
+        text-decoration: none; }
+.logo img { width: 40px; height: 40px; display: block; }
+.logo:hover { filter: brightness(.92); text-decoration: none; }
 .riel { flex: 1 1 auto; min-width: 0; }
 #menu { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 12px; }
 .riel-grupo { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; }
@@ -64,6 +67,15 @@ kbd { font: 11px var(--f-mono); border: 1px solid var(--linea); padding: 2px 6px
          color: var(--suave); display: grid; place-items: center; }
 .icono:hover { color: var(--texto); border-color: var(--linea-2); }
 .icono svg.ico { width: 18px; height: 18px; }
+/* v4.0: cuántos errores de otras computadoras hay sin ver (en el riel, sobre «Historial») */
+.cuenta-riel { margin-left: 7px; background: var(--marca); color: var(--sobre-marca); font: 600 10.5px var(--f-mono);
+               border-radius: 10px; padding: 1px 6px; min-width: 18px; text-align: center; }
+/* v4.0: los errores que llegan de otras computadoras */
+.ayuda.err { color: var(--error); }
+.otros-equipos .dir { font: 12.5px var(--f-mono); background: var(--panel-2); border: 1.5px solid var(--linea);
+                      border-radius: var(--radio-chico); padding: 8px 12px; overflow-wrap: anywhere; }
+.otros-equipos .dir strong { font: 600 13.5px var(--f-mono); }
+.otros-equipos .filas .equipo { font: 600 12.5px var(--f-mono); color: var(--vivo); }
 .contador { position: absolute; top: -6px; right: -6px; background: var(--marca); color: var(--sobre-marca); font: 600 10.5px var(--f-mono);
             border-radius: 10px; padding: 1px 6px; min-width: 18px; text-align: center; }
 

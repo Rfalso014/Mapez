@@ -473,7 +473,7 @@ nombres de mes (`%b`) salen en inglés (como siempre en Python).
 
 ---
 
-## v3.7 a v3.9 (rama New-tool)
+## v3.7 a v4.0 (rama New-tool)
 
 Las notas de diseño de estas versiones están en el **README**, que es el documento que lee el usuario:
 
@@ -483,3 +483,6 @@ Las notas de diseño de estas versiones están en el **README**, que es el docum
   descargado, fechas del mes anterior y repetir por meses o quincenas, actualizaciones automáticas, calendarios de la
   web rellenados por dentro, PDF que se abren en otra pestaña y mapeo de listas propias (README §27, con el apartado
   «Para los que programan» en §27.7).
+* **4.0** — los errores de las demás computadoras llegan a la principal (un segundo servidor, solo en la red local,
+  con clave y solo para recibir errores), arranque sin ventana negra («Bot Web.vbs» + pythonw, con los mensajes en
+  `registros/consola.log`) y logotipo propio (README §28, con «Para los que programan» en §28.4).

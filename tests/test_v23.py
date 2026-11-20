@@ -339,7 +339,7 @@ class TestAccesos(BaseDb):
         self.assertIn("Abre el bot y ejecútalo una vez con la ventana", accesos.MENSAJE_SIN_VENTANA % "h")
         self.assertIn("rechazada", accesos.MENSAJE_RECHAZADA)
         self.assertEqual(accesos.nombre_secreto("h", "c"), "h:c")
-        self.assertEqual(VERSION, "3.9")          # v3.9 (rama New-tool)
+        self.assertEqual(VERSION, "4.0")          # v4.0 (rama New-tool)
 
 
 class TestSecretosIntactos(unittest.TestCase):

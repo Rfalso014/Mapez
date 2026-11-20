@@ -378,6 +378,38 @@ JS_ABRIDOR = r"""el => {
   return !es ? '' : (abierto ? 'abierto' : 'cerrado');
 }"""
 
+# v3.9: ¿pulsar `el` cerraría a `otro` (que ahora se ve)?  Pasa con los menús de la izquierda que se abren y se
+# cierran (acordeones): el reporte se grabó con el menú cerrado, pero en otro equipo ya está abierto y ese clic lo
+# CIERRA.  True si `el` es la cabecera/el botón que abre la sección donde está `otro`.
+JS_CIERRA_LO_QUE_NECESITO = r"""(el, otro) => {
+  if (!el || !otro || el === otro || el.contains(otro) || otro.contains(el)) return false;
+  const clase = (n) => (typeof n.className === 'string' ? n.className : (n.getAttribute && n.getAttribute('class')) || '');
+  const RX = /cabecera|accordion|acorde|collapse|colaps|toggle|dropdown|menu|men\u00fa|nav|header|titulo|t\u00edtulo|group-?head|panel-?head/i;
+  // (a) lo dice la propia página: aria-controls apunta a algo que contiene al otro elemento
+  const ctrl = el.getAttribute('aria-controls') || el.getAttribute('aria-owns') || '';
+  for (const id of ctrl.split(/\s+/)) {
+    if (!id) continue;
+    const panel = el.ownerDocument.getElementById(id);
+    if (panel && panel.contains(otro)) return el.getAttribute('aria-expanded') !== 'false';
+  }
+  // (b) acordeón normal: la cabecera y lo que abre cuelgan del mismo bloque
+  const esCabecera = el.getAttribute('aria-expanded') !== null || el.getAttribute('aria-haspopup') ||
+    ['button', 'tab', 'menuitem'].includes(el.getAttribute('role') || '') || RX.test(clase(el)) ||
+    (el.parentElement && RX.test(clase(el.parentElement)));
+  if (!esCabecera) return false;
+  if (el.getAttribute('aria-expanded') === 'false') return false;      // está cerrado: el clic lo abre, no lo cierra
+  for (let n = el.parentElement, k = 0; n && k < 3 && n !== el.ownerDocument.body; n = n.parentElement, k++) {
+    if (n.contains(otro)) return true;
+  }
+  return false;
+}"""
+# v3.9: ¿el elemento está en el menú de la web (barra lateral, barra de arriba) o en el cuerpo de la página?
+JS_REGION = r"""el => (el.closest('nav, aside, [role=navigation], [role=menubar], .sidebar, .side-bar, .lateral, ' +
+  '.menu-lateral, .main-sidebar, .navbar, .menu, .nav') ? 'menu' : 'cuerpo')"""
+RX_SEL_MENU = re.compile(r"\bnav\b|aside|sidebar|side-bar|lateral|navbar|menu|men\u00fa", re.IGNORECASE)
+RX_SEL_CUERPO = re.compile(r"pesta\u00f1a|pestana|\btab\b|tabs|contenido|content|main\b|cuerpo|body\b|form\b|#tab",
+                           re.IGNORECASE)
+
 # Recuperación (d): marca (data-bot-explorar=k) las opciones visibles de los menús de la página.
 JS_MARCAR_MENUS = r"""body => {
   document.querySelectorAll('[data-bot-explorar]').forEach((e) => e.removeAttribute('data-bot-explorar'));
@@ -1200,10 +1232,15 @@ class Ejecutor:
             res.append(cand)
         return res, bloqueados
 
-    @staticmethod
-    def _elegir(cands):
-        """Entre varios candidatos visibles, prefiere el de la ventanita emergente más reciente
-        (el último en el DOM dentro de un popup); si ninguno está en un popup, el primero."""
+    def _elegir(self, cands, scope=None, selectores=None, usado=None, que=""):
+        """Entre varios candidatos visibles elige el que buscaba el paso:
+
+        1. el de la ventanita emergente más reciente (el último en el DOM dentro de un popup);
+        2. el que ADEMÁS coincide con otro selector del mismo paso (normalmente el más preciso: un id);
+        3. el que está en la misma parte de la página que decían los selectores (el menú de la izquierda o el
+           cuerpo): así un paso grabado en una pestaña del cuerpo no pulsa el enlace del menú que se llama igual.
+
+        Cuando hay varios y hay que elegir, se dice en el registro con cuál se quedó."""
         if len(cands) == 1:
             return cands[0]
         elegido = None
@@ -1211,9 +1248,69 @@ class Ejecutor:
             try:
                 if c.evaluate(JS_EN_POPUP):
                     elegido = c
-            except Exception:
+            except Exception:              # noqa: BLE001
                 continue
-        return elegido or cands[0]
+        if elegido is not None:
+            return elegido
+        motivo = ""
+        por_selector = self._por_otro_selector(cands, scope, selectores, usado)
+        if por_selector is not None:
+            elegido, motivo = por_selector
+        else:
+            por_region = self._por_region(cands, selectores)
+            if por_region is not None:
+                elegido, motivo = por_region
+        if elegido is None:
+            elegido, motivo = cands[0], "se eligió el primero de la página"
+        self._log("    (había %d elementos con ese nombre%s: %s)" % (
+            len(cands), (" para %s" % que) if que else "", motivo))
+        return elegido
+
+    def _por_otro_selector(self, cands, scope, selectores, usado):
+        """(2) El candidato que también coincide con otro selector del paso (p. ej. el id que grabó el bot)."""
+        from playwright.sync_api import Error as ErrorPW
+        if scope is None or not selectores:
+            return None
+        for sel in selectores:
+            if sel == usado:
+                continue
+            try:
+                otros, _b = self._candidatos(scope, sel, visible=True, habilitado=False)
+                if not otros or len(otros) >= len(cands):
+                    continue
+                for o in otros:
+                    o.evaluate("e => e.setAttribute('data-bot-elegido', '1')")
+                try:
+                    buenos = [c for c in cands if c.evaluate("e => e.hasAttribute('data-bot-elegido')")]
+                finally:
+                    for o in otros:
+                        try:
+                            o.evaluate("e => e.removeAttribute('data-bot-elegido')")
+                        except ErrorPW:
+                            pass
+            except ErrorPW:
+                continue
+            if len(buenos) == 1:
+                return buenos[0], "se eligió el que también coincide con «%s»" % mod_flujo.describir_selector(sel)
+        return None
+
+    def _por_region(self, cands, selectores):
+        """(3) El candidato de la misma parte de la página (menú de la web o cuerpo) que decían los selectores."""
+        from playwright.sync_api import Error as ErrorPW
+        texto = " ".join(selectores or [])
+        quiere = "menu" if RX_SEL_MENU.search(texto) else ("cuerpo" if RX_SEL_CUERPO.search(texto) else "")
+        if not quiere:
+            quiere = "cuerpo"          # por defecto, lo del cuerpo de la página (el menú de la web no es el reporte)
+        regiones = []
+        for c in cands:
+            try:
+                regiones.append(c.evaluate(JS_REGION))
+            except ErrorPW:
+                regiones.append("")
+        buenos = [c for c, r in zip(cands, regiones) if r == quiere]
+        if len(buenos) == 1:
+            return buenos[0], "se eligió el %s" % ("del menú de la web" if quiere == "menu" else "del cuerpo de la página")
+        return None
 
     def _avisar_espera(self, que, segundos, habilitado=True):
         texto = ("esperando a que %s esté disponible… %d s" if habilitado else "esperando a que aparezca %s… %d s") % (
@@ -1249,7 +1346,7 @@ class Ejecutor:
                     if cands:
                         if k > 0:
                             self._log("    (usó el selector alternativo %d: %s)" % (k + 1, sel))
-                        return self._elegir(cands)
+                        return self._elegir(cands, scope, selectores, sel, que)
                 except ErrorPW:
                     pass   # la página está navegando o se está redibujando; se reintenta
             ahora = time.monotonic()
@@ -1259,9 +1356,13 @@ class Ejecutor:
                 continue
             if ahora >= fin:
                 nombres = " | ".join(mod_flujo.describir_selector(s) for s in selectores)
+                # v3.9: el mensaje dice QUÉ se estaba esperando (el resumen ya dice en qué paso fue)
+                quien = ("%s " % self._limpiar(que)[:40]) if que and que.startswith("«") else ""
                 if hubo_bloqueados:
-                    raise ErrorPaso("El elemento (%s) apareció pero sigue deshabilitado tras %g s" % (nombres, timeout))
-                raise ErrorPaso("No apareció ningún elemento (%s) en %g s%s" % (nombres, timeout, self._pista()))
+                    raise ErrorPaso("%sapareció pero sigue deshabilitado tras %g s (%s)" % (
+                        quien or "El elemento ", timeout, nombres))
+                raise ErrorPaso("No apareció %s(%s) en %g s%s" % (quien or "ningún elemento ", nombres, timeout,
+                                                                  self._pista()))
             if ahora >= proximo_aviso:
                 self._avisar_espera(que, ahora - inicio, habilitado=habilitado or hubo_bloqueados)
                 proximo_aviso += self.aviso_cada
@@ -1442,6 +1543,8 @@ class Ejecutor:
         if t == "clic":
             if self._clic_en_visor_pdf(pg, paso):      # v3.9: botón del visor de PDF (no es de la página)
                 return
+            if self._menu_ya_abierto(pg, scope, paso):  # v3.9: el menú que abre este clic ya está abierto
+                return
             boton = {"izquierdo": "left", "derecho": "right", "medio": "middle"}[paso.boton]
 
             def hacer_clic(loc, ms):
@@ -1563,10 +1666,10 @@ class Ejecutor:
                     vis, _ = self._candidatos(scope, sel, visible=True, habilitado=False)
                     if not vis:
                         continue
-                    visible = visible or self._elegir(vis)
+                    visible = visible or self._elegir(vis, scope, paso.selectores, sel, que)
                     hab = [c for c in vis if not c.evaluate(JS_BLOQUEADO)]
                     if hab:
-                        habil = self._elegir(hab)
+                        habil = self._elegir(hab, scope, paso.selectores, sel, que)
                         if k > 0:
                             self._log("    (usó el selector alternativo %d: %s)" % (k + 1, sel))
                         break
@@ -3389,6 +3492,7 @@ class Ejecutor:
 
     def _recuperar_reabrir(self, pg, scope, paso):
         """(c) Si el paso anterior fue un clic que abre una lista o menú y ahora está cerrada, repetirlo."""
+        from playwright.sync_api import Error as ErrorPW
         k = self._indice_previo
         if k is None or not (0 <= k < len(self.flujo.pasos)):
             return False
@@ -3405,7 +3509,14 @@ class Ejecutor:
         self._log("    intentando abrir la lista otra vez: clic de nuevo en %s" % (prev.nombre_objetivo() or "el paso anterior"))
         loc.click(timeout=5000)
         self._pausa(0.4)
-        return self._visible_ya(scope, paso, 1.5)
+        if self._visible_ya(scope, paso, 1.5):
+            return True
+        try:                       # v3.9: no sirvió; si era un menú que abre y cierra, se deja como estaba
+            loc.click(timeout=3000)
+            self._log("    (ese clic no sirvió: se deja el menú como estaba)")
+        except ErrorPW:
+            pass
+        return False
 
     def _recuperar_explorar(self, pg, scope, paso):
         """(d) Solo si el elemento existe pero está oculto: pasar el ratón por cada opción de los menús visibles."""
@@ -4143,6 +4254,66 @@ class Ejecutor:
             self._log("    OK (%.1f s)" % (time.monotonic() - inicio))
             self.progreso(i - 1, "ok", "")
         return True
+
+    def _menu_ya_abierto(self, pg, scope, paso):
+        """v3.9: un clic en la cabecera de un menú o sección que ABRE Y CIERRA (los menús de la izquierda de muchas
+        webs).  El reporte se grabó con el menú cerrado, pero en otro equipo (otra ventana, otra página de entrada o
+        porque el navegador lo recuerda) puede estar YA abierto: pulsarlo lo cerraría, el paso siguiente no
+        encontraría su enlace y el reporte se quedaría dando vueltas.  Si lo que necesita el paso siguiente ya se ve
+        y este clic lo cerraría, el paso se salta.  True = saltar."""
+        from playwright.sync_api import Error as ErrorPW
+        if paso.boton != "izquierdo" or paso.doble or not paso.selectores:
+            return False
+        siguiente = self._siguiente_con_elemento()
+        if siguiente is None:
+            return False
+        try:
+            objetivo = self._visible_rapido(siguiente)
+            if objetivo is None:
+                return False
+            cabecera = self._visible_rapido(paso)
+            if cabecera is None:
+                return False
+            cierra = cabecera.evaluate(JS_CIERRA_LO_QUE_NECESITO, objetivo.element_handle(timeout=2000))
+        except (ErrorPW, ErrorPaso):
+            return False
+        if not cierra:
+            return False
+        self._log("    (%s ya está abierto y %s ya se ve: se salta este clic para no cerrarlo)" % (
+            self._limpiar(paso.nombre_objetivo() or "el menú")[:40],
+            self._limpiar(siguiente.nombre_objetivo() or "lo que viene después")[:40]))
+        return True
+
+    def _siguiente_con_elemento(self):
+        """El siguiente paso activo que busca un elemento en la misma pestaña y marco (o None)."""
+        actual = self.flujo.pasos[self._indice_actual]
+        for p in self.flujo.pasos[self._indice_actual + 1:]:
+            if p.desactivado or p.sin_valor() or not p.selectores:
+                continue
+            if p.pagina != actual.pagina or p.marco != actual.marco:
+                return None
+            return p
+        return None
+
+    def _visible_rapido(self, paso, segundos=1.0):
+        """El primer elemento visible de un paso, sin esperas largas ni recuperación (None si no se ve)."""
+        from playwright.sync_api import Error as ErrorPW
+        try:
+            pg, scope = self._alcance(paso, 5)
+        except (ErrorPaso, ErrorPW):
+            return None
+        fin = time.monotonic() + segundos
+        while True:
+            for sel in paso.selectores:
+                try:
+                    cands, _b = self._candidatos(scope, sel, visible=True, habilitado=False)
+                except ErrorPW:
+                    cands = []
+                if cands:
+                    return self._elegir(cands, scope, paso.selectores, sel)
+            if time.monotonic() >= fin:
+                return None
+            self._pausa(0.1)
 
     def _clic_en_visor_pdf(self, pg, paso):
         """v3.9: un clic grabado en los botones del visor de PDF del navegador («Imprimir», «Guardar», «Download») no se

@@ -967,6 +967,17 @@
     if (!E.novedades && p) p.remove();
     a.setAttribute('aria-label', E.novedades ? 'Vigilancia (' + E.novedades + ' novedades)' : 'Vigilancia');
   }
+  // v4.0: cuántos fallos de OTRAS computadoras hay sin ver (número sobre «Historial», que es donde se leen)
+  function marcarErroresOtros(n) {
+    E.erroresOtros = n || 0;
+    const c = $('#cuenta-errores');
+    const a = $('#menu a[data-ruta="historial"]');
+    if (!c || !a) return;
+    c.textContent = E.erroresOtros > 99 ? '99+' : String(E.erroresOtros);
+    c.classList.toggle('oculto', !E.erroresOtros);
+    a.setAttribute('aria-label', E.erroresOtros
+      ? 'Historial (' + E.erroresOtros + ' errores de otras computadoras sin ver)' : 'Historial');
+  }
   async function abrirNotificacion(n) {
     try { await api('POST', 'notificaciones/' + n.id, { leida: true }); } catch (e) { /* nada */ }
     refrescarCampana();
@@ -1121,6 +1132,11 @@
       case 'correo': refrescarCampana(); break;          // v3.4: resultado de revisar una búsqueda de correo
       case 'actualizacion': pintarActualizacion(ev.info); break;   // v3.9: hay otra versión en GitHub
       case 'descargas': E.descargas = ev; pintarDescargas(); break;   // v3.9: la lista de lo que se baja
+      case 'errores_otros':                              // v4.0: ha llegado un fallo de otra computadora
+        marcarErroresOtros((E.erroresOtros || 0) + 1);
+        toast('Falló «' + (ev.reporte || 'un reporte') + '» en ' + (ev.equipo || 'otra computadora'), 'error', 9000);
+        refrescarCampana();
+        break;
       case 'externo': {                                  // v3.7: lo que ejecutan las tareas de Windows (con su progreso)
         const antes = new Map((E.externos || []).map((x) => [x.id, x]));
         E.externos = ev.lista || [];
@@ -5633,13 +5649,69 @@
       claveLista(lista, vis, (e) => e.id, fila, { vacio: () => h('li', { class: 'fila-vacia' }, todas.length ? 'Ninguna ejecución con ese filtro.' : 'Todavía no hay ejecuciones.') });
       meta.textContent = (filtro === 'todos' ? '' : vis.length + ' de ') + todas.length + ' ejecuciones';
     }
+    const otros = h('div', { 'data-otros-equipos': '1' });
+    c.appendChild(otros);
     c.appendChild(h('section', { class: 'tarjeta' }, h('header', null, h('h2', null, 'Ejecuciones'),
       h('div', { class: 'chips-filtro', role: 'group', 'aria-label': 'Filtrar' }, botonesFiltro), meta), lista));
     pintar();
+    const pintarOtros = await panelOtrosEquipos(otros);
     const actualizar = actualizador(() => api('GET', 'historial?limite=150'), (x) => { d = x; pintar(); });
     const pronto = demorar(actualizar, 500);
-    return { actualizar, evento: (ev) => { if ((ev.tipo === 'trabajo' && ev.estado !== 'en_curso') || ev.tipo === 'correo') pronto(); } };
+    return { actualizar: async () => { await actualizar(); await pintarOtros(); },
+      evento: (ev) => { if ((ev.tipo === 'trabajo' && ev.estado !== 'en_curso') || ev.tipo === 'correo') pronto(); if (ev.tipo === 'errores_otros') pintarOtros(); } };
   };
+
+  // v4.0: los fallos que llegan de OTRAS computadoras de la red.  Van en Historial, que es donde el usuario ya mira
+  // «qué ha pasado»: lo de este equipo arriba y lo de los demás en su propia tarjeta, lo último primero.
+  async function panelOtrosEquipos(donde) {
+    const pintar = async () => {
+      let d;
+      try { d = await api('GET', 'errores'); } catch (e) { donde.replaceChildren(); return; }
+      marcarErroresOtros(d.sin_leer || 0);
+      const lista = d.lista || [];
+      if (!lista.length && !d.recibir.activo && !d.recibir.pedido) { donde.replaceChildren(); return; }
+      const filas = h('ul', { class: 'filas', 'aria-label': 'Errores de otras computadoras' });
+      claveLista(filas, lista, (e) => e.id, (e) => h('li', { class: 'fila-rep clic', 'data-error-otro': String(e.id),
+        tabindex: '0', role: 'button', onclick: () => verErrorDeOtro(e, pintar),
+        onkeydown: (ev) => { if (ev.key === 'Enter') verErrorDeOtro(e, pintar); } },
+        h('span', { class: 'punto error', role: 'img', 'aria-label': 'falló' }),
+        h('div', { class: 'nom' }, e.reporte || '(sin nombre)', h('div', { class: 'equipo' }, e.equipo || 'otra computadora'),
+          e.leido ? null : chip('nuevo', 'marca')),
+        h('div', { class: 'cuando' }, cuandoCorto(e.recibido), h('br'), e.paso || ''),
+        h('div', { class: 'det err', title: e.mensaje || '' }, e.mensaje || '—')),
+        { vacio: () => h('li', { class: 'fila-vacia' }, 'Todavía no ha llegado ningún error de otras computadoras.') });
+      const cab = d.recibir.activo
+        ? h('p', { class: 'ayuda' }, 'Esta computadora está recibiendo los errores de las demás en ', h('code', null, d.recibir.direccion), '.')
+        : h('p', { class: 'ayuda err' }, d.recibir.error || 'Recibir está apagado: enciéndelo en Ajustes › Errores de otras computadoras.');
+      donde.replaceChildren(h('section', { class: 'tarjeta otros-equipos' },
+        h('header', null, h('h2', null, 'Errores de otras computadoras'),
+          h('div', { class: 'botones' },
+            d.sin_leer ? boton('Marcar todo como visto', async () => { try { await api('POST', 'errores/vistos', {}); } catch (e) { errorToast(e); } pintar(); }, 'chico', { 'data-errores-vistos': '1' }) : null,
+            lista.length ? boton('Vaciar la lista', async () => {
+              if (!await confirmar('Vaciar la lista', 'Se quitan los ' + lista.length + ' errores que han llegado de otras computadoras. Los reportes y el historial de esta computadora no se tocan.', 'Vaciar')) return;
+              try { await api('DELETE', 'errores', {}); } catch (e) { errorToast(e); } pintar();
+            }, 'chico sec', { 'data-errores-vaciar': '1' }) : null),
+          h('span', { class: 'meta' }, lista.length ? lista.length + ' errores' : '')),
+        cab, filas));
+    };
+    await pintar();
+    return pintar;
+  }
+  async function verErrorDeOtro(e, alCerrar) {
+    let d;
+    try { d = await api('GET', 'errores/' + e.id); } catch (err) { errorToast(err); return; }
+    const x = d.error || {};
+    if (!e.leido) marcarErroresOtros(Math.max(0, (E.erroresOtros || 0) - 1));   // abrirlo ya lo marca como visto
+    abrirModal({ titulo: 'Falló «' + (x.reporte || '') + '» en ' + (x.equipo || 'otra computadora'), ancho: true,
+      contenido: h('div', null,
+        h('p', null, h('strong', null, x.mensaje || '')),
+        h('p', { class: 'ayuda' }, 'Ocurrió: ' + (x.cuando || '?') + ' · llegó aquí: ' + (x.recibido || '?')
+          + (x.paso ? ' · ' + x.paso : '') + (x.version ? ' · Bot Web ' + x.version : '')),
+        h('p', { class: 'ayuda' }, 'Del registro de esa computadora se quitan los datos de acceso y los números largos.'),
+        h('pre', { class: 'registro' }, x.registro || '(no llegó ningún registro)')),
+      alCerrar: () => { if (alCerrar) alCerrar(); },
+      botones: [{ texto: 'Cerrar', clase: 'primario', accion: cerrarModal }] });
+  }
   async function verRegistro(e) {
     try {
       const r = await api('GET', 'historial/' + e.id + '/registro');
@@ -5684,6 +5756,7 @@
       ef('Esperar a que la página cargue', f.esperar_carga, 'Ruedas o barras de «cargando…» y peticiones pendientes. Los menús y listas abiertos no cuentan.'),
       ef('Ver mientras trabaja', f.ver_mientras_trabaja, 'Navegador visible al ejecutar desde esta ventana (las tareas programadas van ocultas).')),
       h('div', { class: 'fila' }, boton('Guardar ajustes', guardar, 'primario'))));
+    await panelErroresDeOtros(c);
     c.appendChild(panel('Guía de inicio', h('p', { class: 'ayuda' }, 'Te enseña con flechas dónde está cada cosa. Se puede saltar en cualquier momento.'),
       h('div', { class: 'fila' }, boton('Ver la guía otra vez', () => verGuia(), '', { 'data-ver-guia': '1' }))));
     const inst = (E.actualizacion && E.actualizacion.instalado) || '';
@@ -5691,6 +5764,90 @@
       h('p', { class: 'ayuda' }, 'La ventana clásica sigue disponible con: python bot.py --clasica'),
       h('div', { class: 'fila' }, boton('Buscar actualizaciones', (ev) => buscarActualizaciones(ev.currentTarget), '', { 'data-buscar-actualizaciones': '1' }))));
   };
+
+  // ------------------------- v4.0: Ajustes › errores de otras computadoras
+  // Dos cosas en la misma pantalla, porque cada computadora hace una: la principal RECIBE y las demás ENVÍAN.
+  async function panelErroresDeOtros(c) {
+    const caja = h('div');
+    c.appendChild(caja);
+    const pintar = async () => {
+      let d;
+      try { d = await api('GET', 'errores'); } catch (e) { return; }
+      const r = d.recibir, en = d.enviar;
+      // --- esta computadora recibe
+      const sw = h('input', { type: 'checkbox', checked: r.activo || r.pedido, id: 'aj-recibir' });
+      const puerto = h('input', { type: 'number', value: r.puerto, min: '1024', max: '65535', style: 'width:8em' });
+      const guardarRecibir = async () => {
+        try {
+          await api('PUT', 'errores/recibir', { activo: sw.checked, puerto: parseInt(puerto.value, 10) || 8765 });
+          toast(sw.checked ? 'Esta computadora ya recibe los errores de las demás' : 'Recibir apagado', 'ok');
+        } catch (e) { errorToast(e); }
+        pintar();
+      };
+      sw.addEventListener('change', guardarRecibir);
+      const dir = r.direccion || ('http://' + ((r.direcciones || [])[0] || 'la-dirección-de-este-equipo') + ':' + r.puerto);
+      const copiar = async (texto, que) => {
+        try { await navigator.clipboard.writeText(texto); toast(que + ' copiado', 'ok'); }
+        catch (e) { toast('Cópialo a mano: ' + texto, 'aviso', 9000); }
+      };
+      const recibiendo = h('div', { class: 'otros-equipos' },
+        h('p', { class: 'ayuda' }, 'Enciéndelo SOLO en la computadora principal. Las demás le mandarán lo que les falle. '
+          + 'Bot Web escucha únicamente en la red local (nunca en Internet) y pide esta clave.'),
+        h('label', { class: 'interruptor' }, sw, h('span', null, 'Recibir los errores de otras computadoras')),
+        r.activo || r.pedido ? h('div', { class: 'formulario' },
+          h('label', null, 'Puerto'), h('div', null, puerto, h('div', { class: 'ayuda' }, 'Cámbialo solo si ese puerto ya está ocupado.'), boton('Aplicar', guardarRecibir, 'chico', { 'data-recibir-puerto': '1' }))) : null,
+        r.activo ? h('div', { class: 'dir' }, 'En las otras computadoras escribe esto en Ajustes:',
+          h('div', null, 'Dirección: ', h('strong', null, dir)),
+          h('div', null, 'Clave: ', h('strong', null, r.clave)),
+          (r.direcciones || []).length > 1 ? h('div', { class: 'ayuda' }, 'Si esa dirección no funciona, prueba con: ' + r.direcciones.join(', ')) : null) : null,
+        r.activo ? h('div', { class: 'fila' },
+          boton('Copiar la dirección', () => copiar(dir, 'La dirección'), 'chico', { 'data-copiar-dir': '1' }),
+          boton('Copiar la clave', () => copiar(r.clave, 'La clave'), 'chico', { 'data-copiar-clave': '1' }),
+          boton('Clave nueva', async () => {
+            if (!await confirmar('Clave nueva', 'La clave de ahora deja de valer: tendrás que escribir la nueva en las otras computadoras.', 'Crear una nueva')) return;
+            try { await api('POST', 'errores/clave', {}); toast('Clave nueva creada', 'ok'); } catch (e) { errorToast(e); }
+            pintar();
+          }, 'chico sec', { 'data-clave-nueva': '1' })) : null,
+        !r.activo && r.error ? h('p', { class: 'ayuda err' }, r.error) : null,
+        r.activo ? h('p', { class: 'ayuda' }, 'Los errores que lleguen se ven en Historial › Errores de otras computadoras.') : null);
+      // --- esta computadora envía
+      const fa = h('input', { type: 'text', value: en.a || '', placeholder: 'http://192.168.1.50:8765' });
+      const fclave = h('input', { type: 'text', value: '', placeholder: en.tiene_clave ? '(la clave ya está guardada)' : 'AAAA-BBBB-CCCC-DDDD' });
+      const fequipo = h('input', { type: 'text', value: en.equipo || '', placeholder: 'Caja 2' });
+      const guardarEnviar = async (avisar) => {
+        const cambios = { a: fa.value.trim(), equipo: fequipo.value.trim() };
+        if (fclave.value.trim()) cambios.clave = fclave.value.trim();
+        try { await api('PUT', 'errores/enviar', cambios); if (avisar !== false) toast('Guardado', 'ok'); }
+        catch (e) { errorToast(e); return false; }
+        return true;
+      };
+      const probar = async (ev) => {
+        const b = ev.currentTarget;
+        if (!await guardarEnviar(false)) return;
+        b.disabled = true; const antes = b.textContent; b.textContent = 'Probando…';
+        try {
+          const res = await api('POST', 'errores/probar', {});
+          toast(res.mensaje + (res.mandados ? ' (y se mandaron ' + res.mandados + ' que estaban en espera)' : ''), res.ok ? 'ok' : 'error', 11000);
+        } catch (e) { errorToast(e); }
+        b.disabled = false; b.textContent = antes;
+        pintar();
+      };
+      const ef = (t, ctl, ayuda) => [h('label', null, t), ayuda ? h('div', null, ctl, h('div', { class: 'ayuda' }, ayuda)) : ctl];
+      const enviando = h('div', null,
+        h('p', { class: 'ayuda' }, 'En las computadoras que NO son la principal: escribe aquí su dirección y su clave. '
+          + 'Se manda el nombre de esta computadora, el reporte, la hora, el paso que falló, el mensaje y el final del registro; '
+          + 'nunca contraseñas ni usuarios.'),
+        h('div', { class: 'formulario' },
+          ef('Enviar mis errores a', fa, 'La dirección que enseña la computadora principal.'),
+          ef('Clave', fclave, en.tiene_clave ? 'Ya hay una clave guardada: escribe otra solo si la cambiaste allí.' : 'La que enseña la computadora principal.'),
+          ef('Nombre de esta computadora', fequipo, 'Así la verás en la lista: «Caja 2», «Oficina»…')),
+        en.pendientes ? h('p', { class: 'ayuda' }, 'Hay ' + en.pendientes + ' error(es) esperando a que la computadora principal esté encendida.') : null,
+        h('div', { class: 'fila' }, boton('Guardar', () => guardarEnviar(true), 'primario', { 'data-enviar-guardar': '1' }),
+          boton('Probar el envío', probar, '', { 'data-enviar-probar': '1' })));
+      caja.replaceChildren(panel('Errores de otras computadoras', recibiendo, h('hr'), enviando));
+    };
+    await pintar();
+  }
 
   // ------------------------------------------------------------------ arranque
   async function arrancar() {
@@ -5729,6 +5886,7 @@
     if (E.estado.trabajo) { E.trabajo = E.estado.trabajo; pintarTrabajo(); }
     if (E.estado.descargas) { E.descargas = E.estado.descargas; pintarDescargas(); }   // v3.9
     pintarActualizacion(E.estado.actualizacion || null);          // v3.9
+    marcarErroresOtros(E.estado.errores_otros || 0);              // v4.0
     try { E.ayuda = await api('GET', 'ayuda'); } catch (e) { /* se pide luego */ }
     refrescarCampana();
     await navegar();

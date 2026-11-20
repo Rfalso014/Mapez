@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40" width="40" height="40" role="img" aria-label="Bot Web">
+  <title>Bot Web</title>
+  <!-- Opcion 3 «Repetir»: el bot repite tus pasos cada vez.  Plano, sin degradados, se lee a 16 px. -->
+  <circle cx="20" cy="20" r="20" fill="#c9243a"/>
+  <g fill="none" stroke="#ffffff" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M28.5 14.5 A10.5 10.5 0 1 0 30 20"/>
+    <path d="M22.5 13.4 H29.4 V6.9"/>
+  </g>
+  <circle cx="20" cy="20" r="3" fill="#ffffff"/>
+</svg>

@@ -2825,11 +2825,10 @@ def probar_ventana(args):
 
 
 def principal(argv=None):
-    for flujo_salida in (sys.stdout, sys.stderr):
-        try:
-            flujo_salida.reconfigure(encoding="utf-8", errors="replace")
-        except Exception:
-            pass
+    # v4.0: con pythonw.exe (al abrir con «Bot Web.vbs» o con el acceso directo) no hay consola y `sys.stdout` es None:
+    # los mensajes van a registros/consola.log.  Con `iniciar.bat` («ver los mensajes») salen por la pantalla.
+    from webbot import consola
+    consola.preparar()
     args = analizar_argumentos(argv)
     if args.smoke:
         return probar_ventana(args)
@@ -2859,5 +2858,35 @@ def principal(argv=None):
     return 0
 
 
+def principal_protegido(argv=None):
+    """`principal()` pero contando lo que pase si el PROGRAMA se cae (no un reporte): queda en el registro y, si en
+    Ajustes se puso una computadora central, se le manda (v4.0)."""
+    try:
+        return principal(argv)
+    except SystemExit:
+        raise
+    except KeyboardInterrupt:
+        return 1
+    except BaseException as e:                      # noqa: BLE001 (se cuenta y se sale con 1, no se esconde)
+        import traceback
+        traza = traceback.format_exc()
+        print(traza, file=sys.stderr, flush=True)
+        try:
+            from webbot import puente
+            ruta = None
+            for i, a in enumerate(argv if argv is not None else sys.argv):
+                if a == "--db" and i + 1 < len(sys.argv):
+                    ruta = sys.argv[i + 1]
+            alm = mod_almacen.Almacen(ruta)
+            try:
+                puente.anotar_fallo(alm, "Bot Web (el programa)", "El programa se cerró con un error: %s: %s" % (
+                    type(e).__name__, e), registro=traza)
+            finally:
+                alm.cerrar()
+        except Exception:                           # noqa: BLE001 (si ni eso se puede, al menos ya está en el registro)
+            pass
+        return 1
+
+
 if __name__ == "__main__":
-    sys.exit(principal())
+    sys.exit(principal_protegido())

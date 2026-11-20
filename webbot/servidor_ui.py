@@ -13,6 +13,10 @@
 
 Las contraseñas solo pasan por la API cuando el usuario las escribe (cambiar contraseña, contestar una pregunta) y van
 directas al Administrador de credenciales: nunca se guardan en la base de datos ni en los registros.
+
+v4.0: «Recibir los errores de otras computadoras» abre un SEGUNDO servidor, aparte de este y con sus propias reglas
+(solo la red local, con clave, solo `POST /api/errores`): está todo en `webbot/puente.py`.  Este servidor sigue
+escuchando únicamente en 127.0.0.1.
 """
 
 import datetime
@@ -191,6 +195,14 @@ class Aplicacion:
         self.salir = threading.Event()
         # v3.9: la lista de lo que baja la ejecución en curso o la última («para cada opción», periodos) para la interfaz
         self.descargas = None
+        # v4.0 «puente de errores»: el receptor (si este equipo es el central) y el hilo que reintenta la cola de salida.
+        # None en las pruebas y hasta que el usuario enciende el interruptor en Ajustes.
+        self.receptor = None
+        self.reenviador = None
+        self.error_receptor = ""
+        # None/False = NO se reintenta la cola en segundo plano: solo la aplicación de verdad (`abrir_aplicacion`) lo
+        # enciende.  Así ninguna prueba abre una conexión a otra computadora.
+        self.reenvio_activo = False
 
     # ----------------------------------------------------------- utilidades
     def _oculto(self, ver):
@@ -328,6 +340,7 @@ class Aplicacion:
                 and not self.sesion_mapa.terminada.is_set(), "al_iniciar": list(self.al_iniciar),
                 "guia_pendiente": bool(self.guia_al_abrir and not self.almacen.ajustes().get("guia_vista")),
                 "descargas": self.descargas,
+                "errores_otros": self.almacen.errores_sin_leer(),      # v4.0: fallos de otros equipos sin ver
                 "actualizacion": self.actualizador.estado() if self.actualizador is not None else None}
 
     # ------------------------------------------------------- v3.9: actualizaciones
@@ -3504,6 +3517,143 @@ class Aplicacion:
         with open(ruta, "rb") as f:
             return ("image/png", f.read())
 
+    # ------------------------------------------------- v4.0: errores de otras computadoras
+    def _estado_errores(self):
+        """Lo que la pantalla necesita saber: cómo está el recibir, cómo está el enviar y la cola pendiente."""
+        from . import puente as mod_puente
+        a = self.almacen.ajustes()
+        r = self.receptor
+        return {
+            "recibir": {
+                "activo": bool(r is not None),
+                "pedido": bool(a.get("recibir_errores")),
+                "puerto": int(a.get("recibir_puerto") or mod_puente.PUERTO_DEFECTO),
+                "direccion": r.url if r is not None else "",
+                "clave": self.almacen.clave("recibir"),          # se ENSEÑA: el usuario la copia en los otros equipos
+                "direcciones": mod_puente.direcciones_de_este_equipo(),
+                "error": self.error_receptor,
+            },
+            "enviar": {
+                "a": a.get("enviar_errores_a") or "",
+                "equipo": a.get("nombre_equipo") or "",
+                "tiene_clave": bool(self.almacen.clave("enviar")),   # la clave de enviar NO se devuelve nunca
+                "pendientes": len(self.almacen.errores_en_cola(limite=201)),
+            },
+        }
+
+    def encender_receptor(self, avisar=True):
+        """Enciende el receptor de errores de otros equipos (si en Ajustes está pedido).  Devuelve el error o «»."""
+        from . import avisos as mod_avisos
+        from . import puente as mod_puente
+        self.apagar_receptor()
+        a = self.almacen.ajustes()
+        if not a.get("recibir_errores"):
+            return ""
+        clave = self.almacen.clave("recibir") or self.almacen.guardar_clave("recibir", mod_puente.clave_nueva())
+
+        def al_llegar(d):
+            self.eventos.emitir("errores_otros", equipo=d.get("equipo") or "", reporte=d.get("reporte") or "")
+            if avisar:
+                mod_avisos.avisar(self.almacen, "error_otro_equipo",
+                                  "Falló «%s» en %s" % (d.get("reporte") or "un reporte", d.get("equipo") or "otro equipo"),
+                                  (d.get("mensaje") or "")[:300], {"equipo": d.get("equipo") or ""})
+        try:
+            self.receptor = mod_puente.Receptor(self.almacen, clave, puerto=a.get("recibir_puerto"),
+                                                al_llegar=al_llegar,
+                                                apuntar=lambda t: print(t, flush=True))
+        except mod_puente.ErrorPuente as e:
+            self.error_receptor = str(e)
+            return self.error_receptor
+        self.error_receptor = ""
+        print("[puente] escuchando los errores de otros equipos en %s" % self.receptor.url, flush=True)
+        return ""
+
+    def arrancar_reenvio(self):
+        """El hilo que cada par de minutos vuelve a intentar mandar lo que quedó en la cola (la computadora central
+        pudo estar apagada).  Solo en la aplicación de verdad y solo si hay a dónde mandar."""
+        from . import puente as mod_puente
+        if not self.reenvio_activo or self.reenviador is not None:
+            return None
+        if not (self.almacen.ajustes().get("enviar_errores_a") or ""):
+            return None
+        self.reenviador = mod_puente.Reenviador(self.almacen).arrancar()
+        return self.reenviador
+
+    def apagar_receptor(self):
+        if self.receptor is not None:
+            try:
+                self.receptor.parar()
+            except Exception:              # noqa: BLE001
+                pass
+            self.receptor = None
+
+    def _api_errores(self, metodo, partes, datos, q):
+        """Los fallos que llegan de otras computadoras y los ajustes del puente.
+
+        GET                     → {recibir, enviar, lista, sin_leer}
+        GET  errores/<id>       → el detalle con su registro
+        PUT  errores/recibir    → {activo, puerto}: enciende o apaga el receptor de este equipo
+        POST errores/clave      → una clave nueva (los otros equipos tendrán que ponerla)
+        PUT  errores/enviar     → {a, equipo, clave}: a dónde manda este equipo sus fallos
+        POST errores/probar     → «Probar el envío»
+        POST errores/<id>/visto → marcar uno como visto;  POST errores/vistos → todos
+        DELETE errores          → vaciar la lista"""
+        from . import puente as mod_puente
+        accion = partes[0] if partes else ""
+        if metodo == "GET" and accion.isdigit():
+            e = self.almacen.error_recibido(int(accion))
+            if e is None:
+                raise ErrorApi("Ese error ya no está en la lista", 404)
+            self.almacen.marcar_error_recibido(int(accion))
+            return {"error": e}
+        if metodo == "GET":
+            return dict(self._estado_errores(), lista=self.almacen.errores_recibidos(limite=200),
+                        sin_leer=self.almacen.errores_sin_leer())
+        if metodo == "DELETE":
+            self.almacen.borrar_errores_recibidos()
+            return {"ok": True, "sin_leer": 0}
+        if metodo == "POST" and accion == "vistos":
+            for e in self.almacen.errores_recibidos(limite=500, solo_no_leidos=True):
+                self.almacen.marcar_error_recibido(e["id"])
+            return {"ok": True, "sin_leer": 0}
+        if metodo == "POST" and accion.isdigit():
+            self.almacen.marcar_error_recibido(int(accion))
+            return {"ok": True, "sin_leer": self.almacen.errores_sin_leer()}
+        if metodo == "PUT" and accion == "recibir":
+            puerto = int(datos.get("puerto") or mod_puente.PUERTO_DEFECTO)
+            if not 1024 <= puerto <= 65535:
+                raise ErrorApi("El puerto tiene que estar entre 1024 y 65535.")
+            self.almacen.guardar_ajustes({"recibir_errores": bool(datos.get("activo")), "recibir_puerto": puerto})
+            if not self.almacen.clave("recibir"):
+                self.almacen.guardar_clave("recibir", mod_puente.clave_nueva())
+            fallo = self.encender_receptor()
+            if fallo:
+                raise ErrorApi(fallo, 409)
+            return self._estado_errores()
+        if metodo == "POST" and accion == "clave":
+            self.almacen.guardar_clave("recibir", mod_puente.clave_nueva())
+            if self.almacen.ajustes().get("recibir_errores"):
+                fallo = self.encender_receptor()
+                if fallo:
+                    raise ErrorApi(fallo, 409)
+            return self._estado_errores()
+        if metodo == "PUT" and accion == "enviar":
+            cambios = {"enviar_errores_a": str(datos.get("a") or "").strip()[:200],
+                       "nombre_equipo": str(datos.get("equipo") or "").strip()[:60]}
+            self.almacen.guardar_ajustes(cambios)
+            if "clave" in datos:                     # la clave solo se escribe: nunca se devuelve
+                self.almacen.guardar_clave("enviar", str(datos.get("clave") or "").strip()[:120])
+            self.arrancar_reenvio()
+            return self._estado_errores()
+        if metodo == "POST" and accion == "probar":
+            a = self.almacen.ajustes()
+            ok, texto = mod_puente.probar(a.get("enviar_errores_a") or "", self.almacen.clave("enviar"),
+                                          a.get("nombre_equipo") or "")
+            mandados, pendientes, motivo = mod_puente.vaciar_cola(self.almacen) if ok else (0, 0, "")
+            return {"ok": ok, "mensaje": texto, "mandados": mandados, "pendientes": pendientes,
+                    "motivo": motivo, "estado": self._estado_errores()}
+        raise ErrorApi("No existe esa acción de /api/errores", 404)
+
     # ---------------------------------------------------------------- ajustes
     def _api_ajustes(self, metodo, partes, datos, q):
         if metodo == "PUT":
@@ -3731,6 +3881,15 @@ def abrir_aplicacion(args):
         from . import actualizar as mod_actualizar
         app.actualizador = mod_actualizar.Actualizador(registrar=lambda linea: print(linea, flush=True),
                                                        emitir=app.eventos.emitir).iniciar_periodico()
+    # v4.0: el puente de errores.  Recibir solo si el usuario lo encendió en Ajustes; enviar (y reintentar la cola)
+    # solo si puso una dirección.  Las pruebas y --smoke-web no llegan aquí: nunca abren un puerto a la red.
+    from . import puente as mod_puente
+    mod_puente.enganchar(almacen)
+    fallo = app.encender_receptor()
+    if fallo:
+        print("[puente] no se pudo recibir los errores de otros equipos: %s" % fallo, flush=True)
+    app.reenvio_activo = True
+    app.arrancar_reenvio()
     app.precargar_tareas()
     srv = ServidorUI(app, puerto=getattr(args, "puerto", 0)).iniciar()
     url = srv.url_con_token("reportes" if ids else "inicio")
@@ -3757,6 +3916,9 @@ def abrir_aplicacion(args):
         pass
     if app.actualizador is not None:
         app.actualizador.parar()
+    if app.reenviador is not None:          # v4.0
+        app.reenviador.parar()
+    app.apagar_receptor()
     app.detener()
     srv.parar()
     almacen.cerrar()

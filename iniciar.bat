@@ -1,6 +1,11 @@
 @echo off
+rem ===========================================================================
+rem  Bot Web - abrir VIENDO LOS MENSAJES (esta ventana negra es a proposito).
+rem  Para abrirlo SIN ventana negra: "Bot Web.vbs" (o el acceso directo que crea
+rem  el instalador).  Este archivo sirve para ver que esta pasando si algo falla.
+rem ===========================================================================
 chcp 65001 >nul
-title Bot Web
+title Bot Web (mensajes)
 cd /d "%~dp0"
 
 python --version >nul 2>&1
